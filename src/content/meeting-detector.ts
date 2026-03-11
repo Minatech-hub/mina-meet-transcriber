@@ -12,12 +12,29 @@ export class MeetingDetector {
   private onEnd: () => void;
 
   // Seletores para detectar que o usuario esta em uma chamada ativa
+  // Multiplas estrategias para cobrir diferentes versoes/idiomas do Meet
   private static IN_CALL_SELECTORS = [
+    // Botao de desligar (vermelho) — principal indicador de chamada ativa
     'button[aria-label*="desligar" i]',
     'button[aria-label*="leave" i]',
     'button[aria-label*="hang up" i]',
+    'button[aria-label*="sair da chamada" i]',
+    'button[aria-label*="Leave call" i]',
     'button[data-tooltip*="desligar" i]',
+    'button[data-tooltip*="Leave" i]',
+    'button[data-tooltip*="Sair" i]',
+    // Botao vermelho de encerrar (icone phone) — classe especifica do Meet
+    'button[jsname="CQylAd"]',
+    // Controles de chamada (mic/camera) indicam que esta em call
+    'div[jscontroller][jsname] button[aria-label*="microfone" i]',
+    'div[jscontroller][jsname] button[aria-label*="microphone" i]',
+    'div[jscontroller][jsname] button[aria-label*="câmera" i]',
+    'div[jscontroller][jsname] button[aria-label*="camera" i]',
+    // Barra inferior de controles do Meet
     '[data-call-active="true"]',
+    // Fallback: area de participantes em video (tiles)
+    'div[data-participant-id]',
+    'div[data-requested-participant-id]',
   ];
 
   constructor(onStart: (title: string) => void, onEnd: () => void) {
@@ -55,8 +72,29 @@ export class MeetingDetector {
 
   private isUserInCall(): boolean {
     for (const selector of MeetingDetector.IN_CALL_SELECTORS) {
-      if (document.querySelector(selector)) return true;
+      const el = document.querySelector(selector);
+      if (el) {
+        if (!this.isInMeeting) {
+          console.log("[Mina Meet] Chamada detectada via seletor:", selector);
+        }
+        return true;
+      }
     }
+
+    // Fallback heuristico: se estamos numa URL de reuniao e o body tem
+    // muitos elementos interativos (botoes, videos), provavelmente esta em call
+    if (window.location.pathname.match(/\/[a-z]{3}-[a-z]{4}-[a-z]{3}/)) {
+      // Verificar se existem elementos de video/stream renderizados
+      const hasVideo = document.querySelectorAll("video").length > 0;
+      const hasCallUI = document.querySelectorAll('button[aria-label]').length >= 3;
+      if (hasVideo && hasCallUI) {
+        if (!this.isInMeeting) {
+          console.log("[Mina Meet] Chamada detectada via fallback (video + botoes)");
+        }
+        return true;
+      }
+    }
+
     return false;
   }
 
