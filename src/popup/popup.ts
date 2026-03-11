@@ -104,11 +104,11 @@ async function init() {
           document.getElementById("diag-meeting")!.textContent =
             `Reuniao: ${diag.currentTitle || "Nao detectada"} (detector: ${diag.meetingDetectorActive ? "ON" : "OFF"})`;
           document.getElementById("diag-captions")!.textContent =
-            `Legendas: observer=${diag.captionObserverActive ? "ON" : "OFF"} | aria-live=${diag.ariaLiveCount} | videos=${diag.videoCount}`;
+            `Fala: SpeechAPI=${diag.speechCaptureActive ? "ON" : "OFF"} | Legendas=${diag.captionObserverActive ? "ON" : "OFF"}`;
           document.getElementById("diag-joyce")!.textContent =
-            `Joyce: ${diag.joyceAssistantActive ? "Ativa" : "Inativa"}`;
+            `Joyce: ${diag.joyceAssistantActive ? "Ativa" : "Inativa"} | SpeechAPI: ${diag.speechApiSupported ? "Suportada" : "NAO suportada"}`;
           document.getElementById("diag-audio")!.textContent =
-            `Botoes com aria: ${diag.buttonsWithAria}`;
+            `DOM: videos=${diag.videoCount} | aria-live=${diag.ariaLiveCount} | botoes=${diag.buttonsWithAria}`;
         }
       }
     } catch {
@@ -146,14 +146,16 @@ async function init() {
       if (result?.textResponse) {
         responseDiv.innerHTML = `<div style="color:var(--pink);font-size:10px;font-weight:600;margin-bottom:4px;">JOYCE</div>${escapeHtml(result.textResponse)}`;
 
-        // Tocar audio se disponivel
-        if (result.audioUrl) {
-          try {
-            const audio = new Audio(result.audioUrl);
-            audio.volume = 0.9;
-            await audio.play();
-          } catch { /* silencioso */ }
-        }
+        // Enviar resposta para o content script reproduzir por VOZ na reuniao
+        try {
+          const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+          if (tab?.id) {
+            chrome.tabs.sendMessage(tab.id, {
+              type: "JOYCE_RESPONSE",
+              data: result,
+            });
+          }
+        } catch { /* silencioso */ }
       } else {
         responseDiv.innerHTML = `<span style="color:var(--red);">Erro: ${result?.error || "sem resposta"}</span>`;
       }

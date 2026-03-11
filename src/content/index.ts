@@ -1,4 +1,5 @@
 import { CaptionObserver } from "./caption-observer";
+import { SpeechCapture } from "./speech-capture";
 import { MeetingDetector } from "./meeting-detector";
 import { JoyceAssistant } from "./joyce-assistant";
 import { installAudioInjector } from "./audio-injector";
@@ -7,20 +8,20 @@ import { playJoyceResponse } from "@/lib/voice";
 
 // CRITICO: instalar o interceptador de audio IMEDIATAMENTE,
 // antes do Google Meet chamar getUserMedia para o microfone.
-// Se instalar tarde demais, o Meet ja tera o stream original e Joyce nao sera ouvida.
 installAudioInjector();
 
 /**
  * Content Script principal — injeta no Google Meet.
  *
- * Responsavel por:
- * 1. Detectar inicio/fim de reunioes
- * 2. Capturar legendas (closed captions)
- * 3. Enviar dados para o Service Worker via chrome.runtime.sendMessage
- * 4. Detectar comandos para a Joyce e reproduzir respostas por audio
+ * Captura fala por DOIS metodos simultaneos:
+ * 1. Web Speech API (SpeechRecognition) — captura microfone local com alta confiabilidade
+ * 2. CaptionObserver — tenta capturar legendas do Meet (outros participantes)
+ *
+ * Joyce responde SEMPRE por voz (audio ElevenLabs ou Web Speech fallback).
  */
 
 let captionObserver: CaptionObserver | null = null;
+let speechCapture: SpeechCapture | null = null;
 let meetingDetector: MeetingDetector | null = null;
 let joyceAssistant: JoyceAssistant | null = null;
 let meetingStartTime = 0;
@@ -45,7 +46,7 @@ function onCaptionCaptured(entry: CaptionEntry): void {
   joyceAssistant?.feed(entry);
 }
 
-/** Quando a Joyce detecta um comando nas legendas */
+/** Quando a Joyce detecta um comando nas legendas/fala */
 async function onJoyceCommand(command: JoyceCommand): Promise<void> {
   console.log(`[Mina Meet Joyce] Comando detectado de ${command.speaker}: "${command.command}"`);
 
@@ -54,8 +55,6 @@ async function onJoyceCommand(command: JoyceCommand): Promise<void> {
 
   // Enviar comando para o Service Worker → backend
   sendMessage({ type: "JOYCE_COMMAND", data: command });
-
-  // O Service Worker vai processar e retornar a resposta via JOYCE_RESPONSE
 }
 
 /** Quando a Joyce responde (recebido do Service Worker) */
@@ -67,23 +66,52 @@ async function onJoyceResponse(response: JoyceResponse): Promise<void> {
     return;
   }
 
-  // Mostrar resposta em texto na tela
+  console.log("[Mina Meet Joyce] Resposta recebida, reproduzindo audio...");
+  console.log("[Mina Meet Joyce] Texto:", response.textResponse);
+  console.log("[Mina Meet Joyce] Tem audioUrl:", !!response.audioUrl);
+
+  // Mostrar bubble visual (texto pequeno na tela)
   showJoyceTextBubble(response.textResponse);
 
-  // Reproduzir resposta por audio
+  // REPRODUZIR POR VOZ — prioridade absoluta
   try {
     await playJoyceResponse(response.textResponse, response.audioUrl || undefined);
+    console.log("[Mina Meet Joyce] Audio reproduzido com sucesso");
   } catch (err) {
-    console.error("[Mina Meet Joyce] Erro ao reproduzir audio:", err);
+    console.error("[Mina Meet Joyce] Erro ao reproduzir audio, tentando fallback:", err);
+    // Fallback direto: tentar Web Speech API
+    try {
+      await speakFallback(response.textResponse);
+    } catch (err2) {
+      console.error("[Mina Meet Joyce] Fallback tambem falhou:", err2);
+    }
   }
 
   // Notificar acao executada
   if (response.action) {
-    const action = response.action;
-    if (action.type === "task_created") {
-      console.log("[Mina Meet Joyce] Tarefa criada:", action.details);
-    }
+    console.log("[Mina Meet Joyce] Acao:", response.action.type, response.action.details);
   }
+}
+
+/** Fallback de voz direto no content script */
+function speakFallback(text: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!("speechSynthesis" in window)) {
+      reject(new Error("speechSynthesis nao disponivel"));
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "pt-BR";
+    utterance.rate = 1.05;
+    utterance.volume = 1.0;
+    const voices = window.speechSynthesis.getVoices();
+    const ptVoice = voices.find((v) => v.lang.startsWith("pt"));
+    if (ptVoice) utterance.voice = ptVoice;
+    utterance.onend = () => resolve();
+    utterance.onerror = (e) => reject(e);
+    window.speechSynthesis.speak(utterance);
+  });
 }
 
 function onMeetingStarted(title: string): void {
@@ -103,21 +131,37 @@ function onMeetingStarted(title: string): void {
     },
   });
 
-  // Iniciar captura de legendas
+  // Iniciar assistente Joyce
+  joyceAssistant = new JoyceAssistant(onJoyceCommand);
+  console.log("[Mina Meet] Joyce assistente ativada — esperando comandos de voz");
+
+  // === METODO 1: Web Speech API (captura microfone local) ===
+  if (SpeechCapture.isSupported()) {
+    speechCapture = new SpeechCapture(onCaptionCaptured, meetingStartTime);
+
+    // Tentar extrair o nome do usuario do Meet
+    const userName = extractLocalUserName();
+    if (userName) {
+      speechCapture.setUserName(userName);
+      console.log("[Mina Meet] Nome do usuario detectado:", userName);
+    }
+
+    speechCapture.start();
+    console.log("[Mina Meet] Web Speech API ativa — capturando fala do microfone");
+  } else {
+    console.warn("[Mina Meet] Web Speech API nao suportada — dependendo apenas das legendas do Meet");
+  }
+
+  // === METODO 2: CaptionObserver (legendas do Meet — captura outros participantes) ===
   captionObserver = new CaptionObserver(onCaptionCaptured, meetingStartTime);
   captionObserver.start();
 
-  // Iniciar assistente Joyce
-  joyceAssistant = new JoyceAssistant(onJoyceCommand);
-  console.log("[Mina Meet] Joyce assistente ativada");
-
-  // SEMPRE tentar ativar legendas automaticamente (essencial para a Joyce funcionar)
+  // Ativar legendas do Meet automaticamente
   setTimeout(() => {
-    console.log("[Mina Meet] Tentando ativar legendas automaticamente...");
+    console.log("[Mina Meet] Ativando legendas do Meet...");
     captionObserver?.tryEnableCaptions();
   }, 3000);
 
-  // Tentar novamente apos 8s caso a primeira tentativa falhe
   setTimeout(() => {
     captionObserver?.tryEnableCaptions();
   }, 8000);
@@ -140,6 +184,9 @@ function onMeetingEnded(): void {
   captionObserver?.stop();
   captionObserver = null;
 
+  speechCapture?.stop();
+  speechCapture = null;
+
   joyceAssistant?.reset();
   joyceAssistant = null;
 
@@ -151,6 +198,31 @@ function onMeetingEnded(): void {
   sendMessage({ type: "MEETING_ENDED" });
 
   removeRecordingIndicator();
+}
+
+/** Tenta extrair o nome do usuario local da interface do Meet */
+function extractLocalUserName(): string {
+  // Metodo 1: botao do perfil do usuario
+  const selfName = document.querySelector('[data-self-name]');
+  if (selfName) {
+    const name = selfName.getAttribute("data-self-name") || selfName.textContent?.trim();
+    if (name) return name;
+  }
+
+  // Metodo 2: titulo da pagina antes do " - Google Meet"
+  // Formato tipico: "Nome - Google Meet"
+  const pageTitle = document.title;
+  if (pageTitle && pageTitle.includes("Google Meet")) {
+    // Nao e o nome do usuario, e o titulo da reuniao
+  }
+
+  // Metodo 3: elemento do chat com "Voce" / "You"
+  const youLabel = document.querySelector('[data-sender-name="You"], [data-sender-name="Você"]');
+  if (youLabel) {
+    return youLabel.getAttribute("data-sender-name") === "You" ? "Eu" : "Eu";
+  }
+
+  return "Eu";
 }
 
 // ========== Indicadores Visuais da Joyce ==========
@@ -195,7 +267,6 @@ function hideJoyceThinkingIndicator(): void {
 }
 
 function showJoyceTextBubble(text: string): void {
-  // Remover bubble anterior
   document.getElementById("mina-joyce-bubble")?.remove();
 
   const el = document.createElement("div");
@@ -221,7 +292,7 @@ function showJoyceTextBubble(text: string): void {
       animation: mina-bubble-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
     ">
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
-        <div style="width:6px;height:6px;background:#00d4aa;border-radius:50;box-shadow:0 0 6px #00d4aa;"></div>
+        <div style="width:6px;height:6px;background:#00d4aa;border-radius:50%;box-shadow:0 0 6px #00d4aa;"></div>
         <span style="font-weight:600;font-size:11px;color:#00d4aa;text-transform:uppercase;letter-spacing:0.5px;">Joyce</span>
       </div>
       <div>${text}</div>
@@ -235,7 +306,7 @@ function showJoyceTextBubble(text: string): void {
   `;
   document.body.appendChild(el);
 
-  // Auto-remover apos 10s
+  // Auto-remover apos 15s
   setTimeout(() => {
     const bubble = document.getElementById("mina-joyce-bubble");
     if (bubble) {
@@ -243,7 +314,7 @@ function showJoyceTextBubble(text: string): void {
       bubble.style.transition = "opacity 0.5s ease";
       setTimeout(() => bubble.remove(), 500);
     }
-  }, 10000);
+  }, 15000);
 }
 
 // ========== Indicador de gravacao ==========
@@ -362,9 +433,11 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
       url: window.location.href,
       meetingDetectorActive: !!meetingDetector,
       captionObserverActive: !!captionObserver,
+      speechCaptureActive: !!speechCapture,
       joyceAssistantActive: !!joyceAssistant,
       meetingStartTime: meetingStartTime > 0 ? new Date(meetingStartTime).toISOString() : null,
       currentTitle: currentMeetingTitle,
+      speechApiSupported: SpeechCapture.isSupported(),
       ariaLiveCount: document.querySelectorAll('[aria-live]').length,
       videoCount: document.querySelectorAll('video').length,
       buttonsWithAria: document.querySelectorAll('button[aria-label]').length,
