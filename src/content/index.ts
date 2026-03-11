@@ -111,15 +111,16 @@ function onMeetingStarted(title: string): void {
   joyceAssistant = new JoyceAssistant(onJoyceCommand);
   console.log("[Mina Meet] Joyce assistente ativada");
 
-  // Tentar ativar legendas automaticamente (verificar config primeiro)
-  chrome.storage.local.get("mina_config", (result) => {
-    const config = result.mina_config;
-    if (config?.autoEnableCaptions) {
-      setTimeout(() => {
-        captionObserver?.tryEnableCaptions();
-      }, 3000);
-    }
-  });
+  // SEMPRE tentar ativar legendas automaticamente (essencial para a Joyce funcionar)
+  setTimeout(() => {
+    console.log("[Mina Meet] Tentando ativar legendas automaticamente...");
+    captionObserver?.tryEnableCaptions();
+  }, 3000);
+
+  // Tentar novamente apos 8s caso a primeira tentativa falhe
+  setTimeout(() => {
+    captionObserver?.tryEnableCaptions();
+  }, 8000);
 
   // Poll participantes a cada 10s
   participantPollInterval = setInterval(() => {
