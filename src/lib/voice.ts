@@ -25,11 +25,19 @@ export async function playJoyceResponse(text: string, audioBase64?: string): Pro
     await injectJoyceAudio(audioBase64, text);
   } catch (err) {
     console.error("[Mina Meet Voice] Erro ao injetar audio:", err);
-    // Fallback final: Web Speech local
-    try {
-      await speakWithWebSpeechLocal(text);
-    } catch {
-      // Silencioso — ja logamos o erro
+    // Fallback: tocar audio ElevenLabs localmente
+    if (audioBase64) {
+      try {
+        const audio = new Audio(audioBase64);
+        audio.volume = 0.9;
+        await audio.play();
+        await new Promise<void>((resolve) => { audio.onended = () => resolve(); });
+      } catch {
+        // Ultimo fallback: Web Speech local
+        try { await speakWithWebSpeechLocal(text); } catch { /* silencioso */ }
+      }
+    } else {
+      try { await speakWithWebSpeechLocal(text); } catch { /* silencioso */ }
     }
   } finally {
     hideSpeakingIndicator();

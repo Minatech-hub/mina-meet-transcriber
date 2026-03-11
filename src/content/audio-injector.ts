@@ -84,14 +84,40 @@ export async function injectJoyceAudio(audioBase64?: string, text?: string): Pro
       });
     }
 
-    console.log("[Mina Injector] Pipeline nao pronto, fallback para audio local");
+    // Pipeline nao pronto — tocar audio ElevenLabs localmente (so o usuario ouve)
+    console.log("[Mina Injector] Pipeline nao pronto, tocando audio localmente");
+    return playAudioLocally(audioBase64);
   }
 
-  // Fallback: Web Speech API local (apenas o usuario ouve)
+  // Fallback final: Web Speech API local (apenas o usuario ouve)
   if (text) {
     console.log("[Mina Injector] Fallback: Web Speech local");
     return speakLocal(text);
   }
+}
+
+/** Toca audio base64 localmente via elemento <audio> (apenas o usuario ouve) */
+function playAudioLocally(audioBase64: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    try {
+      const audio = new Audio(audioBase64);
+      audio.volume = 0.9;
+      audio.onended = () => {
+        console.log("[Mina Injector] Audio local finalizado");
+        resolve();
+      };
+      audio.onerror = (e) => {
+        console.error("[Mina Injector] Erro ao tocar audio local:", e);
+        reject(e);
+      };
+      audio.play().catch((err) => {
+        console.error("[Mina Injector] Erro ao iniciar audio local:", err);
+        reject(err);
+      });
+    } catch (err) {
+      reject(err);
+    }
+  });
 }
 
 /** Web Speech API local (apenas o usuario ouve) */
