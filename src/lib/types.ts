@@ -48,7 +48,11 @@ export type Message =
   | { type: "SEND_NOW" }
   | { type: "TOGGLE_RECORDING"; data: { enabled: boolean } }
   | { type: "JOYCE_COMMAND"; data: JoyceCommand }
-  | { type: "JOYCE_RESPONSE"; data: JoyceResponse };
+  | { type: "JOYCE_RESPONSE"; data: JoyceResponse }
+  | { type: "GET_LAST_MEETING" }
+  | { type: "GET_LAST_SUMMARY" }
+  | { type: "GENERATE_SUMMARY" }
+  | { type: "CLEAR_LAST_MEETING" };
 
 /** Comando detectado para a Joyce durante a reuniao */
 export interface JoyceCommand {

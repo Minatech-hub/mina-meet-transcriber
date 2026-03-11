@@ -4,6 +4,8 @@ const STORAGE_KEYS = {
   CONFIG: "mina_config",
   STATE: "mina_state",
   CURRENT_MEETING: "mina_current_meeting",
+  LAST_MEETING: "mina_last_meeting",
+  LAST_SUMMARY: "mina_last_summary",
 } as const;
 
 const DEFAULT_CONFIG: ExtensionConfig = {
@@ -56,5 +58,39 @@ export async function saveCurrentMeeting(meeting: MeetingData | null): Promise<v
     await chrome.storage.local.set({ [STORAGE_KEYS.CURRENT_MEETING]: meeting });
   } else {
     await chrome.storage.local.remove(STORAGE_KEYS.CURRENT_MEETING);
+  }
+}
+
+export async function getLastMeeting(): Promise<MeetingData | null> {
+  const result = await chrome.storage.local.get(STORAGE_KEYS.LAST_MEETING);
+  return result[STORAGE_KEYS.LAST_MEETING] || null;
+}
+
+export async function saveLastMeeting(meeting: MeetingData | null): Promise<void> {
+  if (meeting) {
+    await chrome.storage.local.set({ [STORAGE_KEYS.LAST_MEETING]: meeting });
+  } else {
+    await chrome.storage.local.remove(STORAGE_KEYS.LAST_MEETING);
+  }
+}
+
+export interface MeetingSummary {
+  summary: string;
+  action_items: { title: string; assignee?: string; type?: string; deadline?: string }[];
+  decisions: { decision: string; context?: string }[];
+  key_topics: string[];
+  generatedAt: string;
+}
+
+export async function getLastSummary(): Promise<MeetingSummary | null> {
+  const result = await chrome.storage.local.get(STORAGE_KEYS.LAST_SUMMARY);
+  return result[STORAGE_KEYS.LAST_SUMMARY] || null;
+}
+
+export async function saveLastSummary(summary: MeetingSummary | null): Promise<void> {
+  if (summary) {
+    await chrome.storage.local.set({ [STORAGE_KEYS.LAST_SUMMARY]: summary });
+  } else {
+    await chrome.storage.local.remove(STORAGE_KEYS.LAST_SUMMARY);
   }
 }

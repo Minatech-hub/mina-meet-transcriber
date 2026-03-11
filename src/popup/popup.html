@@ -15,29 +15,33 @@
       --pink: #ff6b9d;
       --red: #ef4444;
       --yellow: #f59e0b;
+      --blue: #3b82f6;
+      --purple: #a855f7;
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
-      width: 320px;
-      min-height: 200px;
+      width: 400px;
+      max-height: 580px;
       background: var(--bg);
       color: var(--text);
       font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
       font-size: 13px;
+      overflow-y: auto;
     }
 
     .header {
       display: flex;
       align-items: center;
-      gap: 10px;
-      padding: 14px 16px;
+      justify-content: space-between;
+      padding: 12px 16px;
       border-bottom: 1px solid var(--border);
       background: var(--surface);
+      position: sticky;
+      top: 0;
+      z-index: 10;
     }
-
-    .header img { width: 28px; height: 28px; border-radius: 6px; }
 
     .header .title {
       font-size: 14px;
@@ -50,7 +54,29 @@
       color: var(--text-muted);
     }
 
-    .content { padding: 16px; }
+    .header-actions {
+      display: flex;
+      gap: 6px;
+    }
+
+    .icon-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 6px;
+      font-size: 11px;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .icon-btn:hover { background: var(--surface); color: var(--text); border-color: var(--green); }
+    .icon-btn.active { background: var(--green); color: #000; border-color: var(--green); }
+
+    .content { padding: 12px 16px; }
 
     .status-card {
       background: var(--surface);
@@ -64,66 +90,180 @@
       display: flex;
       align-items: center;
       gap: 8px;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
 
-    .status-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
-
-    .status-dot.active {
-      background: var(--red);
-      animation: pulse 1.5s ease-in-out infinite;
-    }
-
-    .status-dot.inactive {
-      background: var(--text-muted);
-    }
-
-    .status-dot.success {
-      background: var(--green);
-    }
-
-    .status-dot.error {
-      background: var(--red);
-    }
-
-    .status-label {
-      font-weight: 600;
-      font-size: 13px;
-    }
+    .status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .status-dot.active { background: var(--red); animation: pulse 1.5s ease-in-out infinite; }
+    .status-dot.inactive { background: var(--text-muted); }
+    .status-dot.done { background: var(--green); }
+    .status-label { font-weight: 600; font-size: 13px; }
 
     .stat-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-      margin-top: 10px;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 6px;
+      margin-top: 8px;
     }
 
     .stat-item {
       background: rgba(255,255,255,0.03);
       border-radius: 8px;
-      padding: 10px;
+      padding: 8px;
       text-align: center;
     }
 
-    .stat-value {
-      font-size: 20px;
-      font-weight: 700;
-      color: var(--green);
-    }
-
+    .stat-value { font-size: 18px; font-weight: 700; color: var(--green); }
     .stat-label {
-      font-size: 10px;
+      font-size: 9px;
       color: var(--text-muted);
       text-transform: uppercase;
       letter-spacing: 0.5px;
       margin-top: 2px;
     }
 
+    .meeting-title {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      gap: 2px;
+      background: var(--surface);
+      border-radius: 8px;
+      padding: 3px;
+      margin-bottom: 12px;
+    }
+
+    .tab {
+      flex: 1;
+      padding: 7px 8px;
+      border: none;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      background: transparent;
+      color: var(--text-muted);
+      transition: all 0.2s;
+    }
+
+    .tab.active { background: var(--green); color: #000; }
+    .tab:hover:not(.active) { color: var(--text); }
+
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* Transcript */
+    .transcript-list {
+      max-height: 300px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px;
+    }
+
+    .transcript-entry {
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .transcript-entry:last-child { border-bottom: none; }
+    .transcript-speaker { color: var(--green); font-weight: 600; font-size: 11px; }
+    .transcript-time { color: var(--text-muted); font-size: 10px; margin-left: 6px; }
+    .transcript-text { margin-top: 2px; color: var(--text); }
+
+    /* Summary */
+    .summary-section {
+      margin-bottom: 14px;
+    }
+
+    .summary-section-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .summary-section-title .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+
+    .summary-text {
+      font-size: 12px;
+      line-height: 1.6;
+      color: var(--text);
+      background: var(--surface);
+      border-radius: 8px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+    }
+
+    .action-item {
+      display: flex;
+      gap: 8px;
+      padding: 8px 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 6px;
+      font-size: 12px;
+      align-items: flex-start;
+    }
+
+    .action-checkbox {
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--border);
+      border-radius: 3px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .action-title { flex: 1; line-height: 1.4; }
+    .action-assignee { color: var(--pink); font-size: 10px; margin-top: 2px; }
+
+    .decision-item {
+      padding: 8px 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--purple);
+      border-radius: 0 8px 8px 0;
+      margin-bottom: 6px;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .topic-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .topic-tag {
+      background: rgba(0, 212, 170, 0.1);
+      border: 1px solid rgba(0, 212, 170, 0.2);
+      color: var(--green);
+      border-radius: 12px;
+      padding: 3px 10px;
+      font-size: 11px;
+    }
+
+    /* Buttons */
     .btn {
       width: 100%;
       padding: 10px;
@@ -139,30 +279,23 @@
       gap: 6px;
     }
 
-    .btn-primary {
-      background: var(--green);
-      color: #000;
-    }
-
+    .btn-primary { background: var(--green); color: #000; }
     .btn-primary:hover { opacity: 0.85; }
-
-    .btn-secondary {
-      background: transparent;
-      color: var(--text-muted);
-      border: 1px solid var(--border);
-    }
-
-    .btn-secondary:hover {
-      background: var(--surface);
-      color: var(--text);
-    }
-
-    .btn-danger {
-      background: var(--red);
-      color: #fff;
-    }
-
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
+    .btn-secondary:hover { background: var(--surface); color: var(--text); }
+    .btn-ai { background: linear-gradient(135deg, var(--purple), var(--pink)); color: #fff; }
+    .btn-ai:hover { opacity: 0.9; }
+    .btn-ai:disabled { opacity: 0.5; cursor: not-allowed; }
     .btn + .btn { margin-top: 8px; }
+
+    .btn-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn-row .btn { flex: 1; }
+    .btn-row .btn + .btn { margin-top: 0; }
 
     .no-config {
       text-align: center;
@@ -170,24 +303,15 @@
       color: var(--text-muted);
     }
 
-    .no-config a {
-      color: var(--green);
-      text-decoration: none;
-    }
+    .no-config a { color: var(--green); text-decoration: none; }
 
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.3; }
-    }
-
-    .meeting-title {
-      font-size: 12px;
+    .empty-state {
+      text-align: center;
+      padding: 30px 20px;
       color: var(--text-muted);
-      margin-top: 4px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
     }
+
+    .empty-state .emoji { font-size: 28px; margin-bottom: 8px; }
 
     .sync-status {
       font-size: 11px;
@@ -195,6 +319,31 @@
       margin-top: 10px;
       text-align: center;
     }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
   </style>
 </head>
 <body>
@@ -203,41 +352,157 @@
       <div class="title">Mina Meet Transcriber</div>
       <div class="subtitle" id="client-name">Configurar...</div>
     </div>
+    <div class="header-actions">
+      <button class="icon-btn" id="btn-options" title="Configuracoes">&#9881;</button>
+    </div>
   </div>
 
   <div class="content">
+    <!-- Nao configurado -->
     <div id="no-config" class="no-config" style="display:none;">
       <p>Extensao nao configurada.</p>
       <p style="margin-top:8px;"><a href="#" id="open-options">Abrir Configuracoes</a></p>
     </div>
 
+    <!-- Conteudo principal -->
     <div id="main-content">
-      <div class="status-card">
-        <div class="status-row">
-          <div class="status-dot" id="status-dot"></div>
-          <span class="status-label" id="status-label">Inativo</span>
-        </div>
-        <div class="meeting-title" id="meeting-title"></div>
+      <!-- Status da reuniao ativa -->
+      <div id="live-section">
+        <div class="status-card">
+          <div class="status-row">
+            <div class="status-dot" id="status-dot"></div>
+            <span class="status-label" id="status-label">Inativo</span>
+          </div>
+          <div class="meeting-title" id="meeting-title"></div>
 
-        <div class="stat-grid">
-          <div class="stat-item">
-            <div class="stat-value" id="entries-count">0</div>
-            <div class="stat-label">Falas</div>
-          </div>
-          <div class="stat-item">
-            <div class="stat-value" id="participants-count">0</div>
-            <div class="stat-label">Participantes</div>
+          <div class="stat-grid">
+            <div class="stat-item">
+              <div class="stat-value" id="entries-count">0</div>
+              <div class="stat-label">Falas</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value" id="participants-count">0</div>
+              <div class="stat-label">Participantes</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value" id="duration-display">--</div>
+              <div class="stat-label">Duracao</div>
+            </div>
           </div>
         </div>
+
+        <button class="btn btn-primary" id="btn-send" style="display:none;">
+          Enviar Agora
+        </button>
       </div>
 
-      <button class="btn btn-primary" id="btn-send" style="display:none;">
-        Enviar Agora
-      </button>
+      <!-- Ultima reuniao finalizada -->
+      <div id="last-meeting-section" style="display:none;">
+        <div class="status-card">
+          <div class="status-row">
+            <div class="status-dot done"></div>
+            <span class="status-label">Reuniao Finalizada</span>
+          </div>
+          <div class="meeting-title" id="last-meeting-title"></div>
+          <div class="stat-grid">
+            <div class="stat-item">
+              <div class="stat-value" id="last-entries-count">0</div>
+              <div class="stat-label">Falas</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value" id="last-participants-count">0</div>
+              <div class="stat-label">Participantes</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value" id="last-duration">--</div>
+              <div class="stat-label">Duracao</div>
+            </div>
+          </div>
+        </div>
 
-      <button class="btn btn-secondary" id="btn-options">
-        Configuracoes
-      </button>
+        <!-- Tabs: Transcricao | Resumo IA -->
+        <div class="tabs">
+          <button class="tab active" data-tab="transcript">Transcricao</button>
+          <button class="tab" data-tab="summary">Resumo IA</button>
+        </div>
+
+        <!-- Tab: Transcricao -->
+        <div class="tab-content active" id="tab-transcript">
+          <div class="btn-row" style="margin-bottom: 10px;">
+            <button class="btn btn-secondary" id="btn-copy-transcript">&#128203; Copiar</button>
+            <button class="btn btn-secondary" id="btn-download-transcript">&#11015; Baixar .txt</button>
+          </div>
+          <div class="transcript-list" id="transcript-list">
+            <div class="empty-state">Carregando...</div>
+          </div>
+        </div>
+
+        <!-- Tab: Resumo IA -->
+        <div class="tab-content" id="tab-summary">
+          <div id="summary-empty">
+            <div class="empty-state">
+              <div style="font-size: 28px; margin-bottom: 8px;">&#129302;</div>
+              <p>Gere um resumo inteligente da reuniao com IA</p>
+              <p style="font-size:11px; margin-top:4px; color: var(--text-muted);">
+                Inclui resumo executivo, itens de acao, decisoes e topicos
+              </p>
+            </div>
+            <button class="btn btn-ai" id="btn-generate-summary">
+              &#10024; Gerar Resumo com IA
+            </button>
+          </div>
+
+          <div id="summary-loading" style="display:none;">
+            <div class="empty-state">
+              <div class="spinner"></div>
+              <p style="margin-top:10px;">Gerando resumo inteligente...</p>
+            </div>
+          </div>
+
+          <div id="summary-content" style="display:none;">
+            <div class="btn-row" style="margin-bottom: 10px;">
+              <button class="btn btn-secondary" id="btn-copy-summary">&#128203; Copiar Resumo</button>
+              <button class="btn btn-secondary" id="btn-download-summary">&#11015; Baixar .md</button>
+            </div>
+
+            <div id="summary-topics" class="summary-section" style="display:none;">
+              <div class="summary-section-title">
+                <span class="dot" style="background: var(--green);"></span>
+                <span style="color: var(--green);">Topicos</span>
+              </div>
+              <div class="topic-tags" id="topics-list"></div>
+            </div>
+
+            <div class="summary-section">
+              <div class="summary-section-title">
+                <span class="dot" style="background: var(--blue);"></span>
+                <span style="color: var(--blue);">Resumo Executivo</span>
+              </div>
+              <div class="summary-text" id="summary-text"></div>
+            </div>
+
+            <div id="summary-actions" class="summary-section" style="display:none;">
+              <div class="summary-section-title">
+                <span class="dot" style="background: var(--yellow);"></span>
+                <span style="color: var(--yellow);">Itens de Acao</span>
+              </div>
+              <div id="actions-list"></div>
+            </div>
+
+            <div id="summary-decisions" class="summary-section" style="display:none;">
+              <div class="summary-section-title">
+                <span class="dot" style="background: var(--purple);"></span>
+                <span style="color: var(--purple);">Decisoes</span>
+              </div>
+              <div id="decisions-list"></div>
+            </div>
+          </div>
+        </div>
+
+        <button class="btn btn-secondary" id="btn-clear" style="margin-top: 12px;">
+          &#10006; Limpar e fechar
+        </button>
+      </div>
 
       <div class="sync-status" id="sync-status"></div>
     </div>

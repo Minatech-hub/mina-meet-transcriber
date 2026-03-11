@@ -22,34 +22,48 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { transcription_id } = await req.json();
-    if (!transcription_id) {
+    const body = await req.json();
+    const { transcription_id, inline_data } = body;
+
+    let transcription: Record<string, unknown>;
+
+    if (inline_data) {
+      // Modo inline: dados enviados diretamente pelo popup (sem buscar no banco)
+      transcription = {
+        title: inline_data.title || "Reuniao",
+        participants: inline_data.participants || [],
+        duration_seconds: inline_data.duration_seconds || null,
+        raw_text: inline_data.raw_text || "",
+        transcript: inline_data.transcript || [],
+      };
+    } else if (transcription_id) {
+      // Modo banco: buscar pelo ID
+      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+      const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      const { data, error: fetchError } = await supabase
+        .from("meeting_transcriptions")
+        .select("*")
+        .eq("id", transcription_id)
+        .single();
+
+      if (fetchError || !data) {
+        return new Response(
+          JSON.stringify({ error: "Transcricao nao encontrada" }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      transcription = data;
+    } else {
       return new Response(
-        JSON.stringify({ error: "transcription_id obrigatorio" }),
+        JSON.stringify({ error: "transcription_id ou inline_data obrigatorio" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Buscar transcricao
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    const { data: transcription, error: fetchError } = await supabase
-      .from("meeting_transcriptions")
-      .select("*")
-      .eq("id", transcription_id)
-      .single();
-
-    if (fetchError || !transcription) {
-      return new Response(
-        JSON.stringify({ error: "Transcricao nao encontrada" }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
     // Montar texto para a OpenAI
-    const rawText = transcription.raw_text ||
+    const rawText = (transcription.raw_text as string) ||
       (transcription.transcript as Array<{ speaker: string; text: string }>)
         .map((e) => `[${e.speaker}]: ${e.text}`)
         .join("\n");
@@ -133,32 +147,34 @@ Responda em portugues brasileiro.`;
       parsed = { summary: content, action_items: [], decisions: [] };
     }
 
-    // Atualizar transcricao no banco
-    const { error: updateError } = await supabase
-      .from("meeting_transcriptions")
-      .update({
-        summary: parsed.summary || null,
-        action_items: parsed.action_items || [],
-        decisions: parsed.decisions || [],
-        status: "resumido",
-        metadata: {
-          ...((transcription.metadata as Record<string, unknown>) || {}),
-          key_topics: parsed.key_topics || [],
-          summarized_at: new Date().toISOString(),
-        },
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", transcription_id);
+    // Se veio do banco, atualizar a transcricao
+    if (transcription_id) {
+      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+      const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+      const supabase = createClient(supabaseUrl, supabaseKey);
 
-    if (updateError) {
-      console.error("Erro ao atualizar transcricao:", updateError);
-      return new Response(
-        JSON.stringify({ error: "Erro ao salvar resumo", details: updateError.message }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      const { error: updateError } = await supabase
+        .from("meeting_transcriptions")
+        .update({
+          summary: parsed.summary || null,
+          action_items: parsed.action_items || [],
+          decisions: parsed.decisions || [],
+          status: "resumido",
+          metadata: {
+            ...((transcription.metadata as Record<string, unknown>) || {}),
+            key_topics: parsed.key_topics || [],
+            summarized_at: new Date().toISOString(),
+          },
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", transcription_id);
+
+      if (updateError) {
+        console.error("Erro ao atualizar transcricao:", updateError);
+      }
     }
 
-    console.log(`Transcricao ${transcription_id} sumarizada com sucesso`);
+    console.log("Sumarizacao concluida com sucesso");
 
     return new Response(
       JSON.stringify({
@@ -166,6 +182,7 @@ Responda em portugues brasileiro.`;
         summary: parsed.summary,
         action_items: parsed.action_items,
         decisions: parsed.decisions,
+        key_topics: parsed.key_topics,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

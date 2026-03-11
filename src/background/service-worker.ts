@@ -1,5 +1,5 @@
 import { Message, MeetingData, CaptionEntry, ExtensionState, JoyceCommand } from "@/lib/types";
-import { getState, saveState, getCurrentMeeting, saveCurrentMeeting } from "@/lib/storage";
+import { getState, saveState, getCurrentMeeting, saveCurrentMeeting, saveLastMeeting, getLastMeeting, saveLastSummary, getLastSummary } from "@/lib/storage";
 import { saveTranscription, requestSummarize, sendJoyceCommand } from "@/lib/api";
 
 /**
@@ -39,6 +39,16 @@ async function handleMessage(msg: Message, sender?: chrome.runtime.MessageSender
       return handleSendNow();
     case "JOYCE_COMMAND":
       return handleJoyceCommand(msg.data, sender?.tab?.id);
+    case "GET_LAST_MEETING":
+      return getLastMeeting();
+    case "GET_LAST_SUMMARY":
+      return getLastSummary();
+    case "GENERATE_SUMMARY":
+      return handleGenerateSummary();
+    case "CLEAR_LAST_MEETING":
+      await saveLastMeeting(null);
+      await saveLastSummary(null);
+      return { ok: true };
     default:
       return { ok: true };
   }
@@ -87,6 +97,10 @@ async function handleMeetingEnded(): Promise<void> {
   console.log(
     `[Mina Meet SW] Reuniao encerrada: ${meeting.entries.length} falas, ${meeting.durationSeconds}s`
   );
+
+  // Salvar como ultima reuniao (para exibir no popup)
+  await saveLastMeeting(meeting);
+  await saveLastSummary(null); // limpar resumo anterior
 
   // Enviar para o backend
   if (meeting.entries.length > 0) {
@@ -203,6 +217,64 @@ async function handleJoyceCommand(command: JoyceCommand, tabId?: number): Promis
     }).catch((err) => {
       console.error("[Mina Meet SW] Erro ao enviar resposta Joyce:", err);
     });
+  }
+}
+
+// ========== Gerar Resumo IA ==========
+
+async function handleGenerateSummary(): Promise<{ success: boolean; error?: string }> {
+  const meeting = await getLastMeeting();
+  if (!meeting || meeting.entries.length === 0) {
+    return { success: false, error: "Nenhuma reuniao disponivel" };
+  }
+
+  try {
+    const config = await (await import("@/lib/storage")).getConfig();
+    const apiUrl = config.apiUrl;
+    const apiKey = config.apiKey;
+
+    // Montar texto da transcricao
+    const rawText = meeting.entries
+      .map((e) => `[${e.speaker}]: ${e.text}`)
+      .join("\n");
+
+    const response = await fetch(`${apiUrl}/meet-transcriber-summarize`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-meet-api-key": apiKey,
+      },
+      body: JSON.stringify({
+        transcription_id: null,
+        inline_data: {
+          title: meeting.title,
+          participants: meeting.participants,
+          duration_seconds: meeting.durationSeconds,
+          raw_text: rawText,
+          transcript: meeting.entries,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      return { success: false, error: `HTTP ${response.status}` };
+    }
+
+    const result = await response.json();
+
+    if (result.summary || result.action_items) {
+      await saveLastSummary({
+        summary: result.summary || "",
+        action_items: result.action_items || [],
+        decisions: result.decisions || [],
+        key_topics: result.key_topics || [],
+        generatedAt: new Date().toISOString(),
+      });
+    }
+
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: String(err) };
   }
 }
 
