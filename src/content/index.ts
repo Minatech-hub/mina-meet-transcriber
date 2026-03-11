@@ -1,5 +1,4 @@
 import { CaptionObserver } from "./caption-observer";
-import { SpeechCapture } from "./speech-capture";
 import { MeetingDetector } from "./meeting-detector";
 import { JoyceAssistant } from "./joyce-assistant";
 import { installAudioInjector } from "./audio-injector";
@@ -21,7 +20,7 @@ installAudioInjector();
  */
 
 let captionObserver: CaptionObserver | null = null;
-let speechCapture: SpeechCapture | null = null;
+let speechActive = false;
 let meetingDetector: MeetingDetector | null = null;
 let joyceAssistant: JoyceAssistant | null = null;
 let meetingStartTime = 0;
@@ -33,6 +32,37 @@ function sendMessage(msg: Message): void {
     // Service worker pode estar inativo — sera reativado pela proxima mensagem
   });
 }
+
+// ========== Receber fala do MAIN world (audio-hook.ts SpeechRecognition) ==========
+
+window.addEventListener("message", (event) => {
+  if (event.source !== window) return;
+  const msg = event.data;
+
+  // Resultado de fala capturada pelo SpeechRecognition no MAIN world
+  if (msg?.type === "MINA_SPEECH_RESULT" && msg.text) {
+    const text = msg.text as string;
+    console.log(`[Mina Meet] Fala recebida do MAIN world: "${text}"`);
+
+    const entry: CaptionEntry = {
+      timestamp: Date.now() - meetingStartTime,
+      speaker: "Eu",
+      text,
+      capturedAt: new Date().toISOString(),
+    };
+
+    onCaptionCaptured(entry);
+  }
+
+  // Status do SpeechRecognition
+  if (msg?.type === "MINA_SPEECH_STATUS") {
+    if (msg.active) {
+      console.log("[Mina Meet] SpeechRecognition ativo no MAIN world");
+    } else if (msg.error) {
+      console.warn("[Mina Meet] SpeechRecognition erro:", msg.error);
+    }
+  }
+});
 
 function onCaptionCaptured(entry: CaptionEntry): void {
   sendMessage({ type: "CAPTION_CAPTURED", data: entry });
@@ -135,22 +165,12 @@ function onMeetingStarted(title: string): void {
   joyceAssistant = new JoyceAssistant(onJoyceCommand);
   console.log("[Mina Meet] Joyce assistente ativada — esperando comandos de voz");
 
-  // === METODO 1: Web Speech API (captura microfone local) ===
-  if (SpeechCapture.isSupported()) {
-    speechCapture = new SpeechCapture(onCaptionCaptured, meetingStartTime);
-
-    // Tentar extrair o nome do usuario do Meet
-    const userName = extractLocalUserName();
-    if (userName) {
-      speechCapture.setUserName(userName);
-      console.log("[Mina Meet] Nome do usuario detectado:", userName);
-    }
-
-    speechCapture.start();
-    console.log("[Mina Meet] Web Speech API ativa — capturando fala do microfone");
-  } else {
-    console.warn("[Mina Meet] Web Speech API nao suportada — dependendo apenas das legendas do Meet");
-  }
+  // === METODO 1: Web Speech API no MAIN world (via audio-hook.ts) ===
+  // O audio-hook.ts inicia automaticamente apos interceptar getUserMedia
+  // Mas podemos pedir para iniciar manualmente tambem
+  window.postMessage({ type: "MINA_START_SPEECH" }, "*");
+  speechActive = true;
+  console.log("[Mina Meet] Solicitando SpeechRecognition no MAIN world");
 
   // === METODO 2: CaptionObserver (legendas do Meet — captura outros participantes) ===
   captionObserver = new CaptionObserver(onCaptionCaptured, meetingStartTime);
@@ -184,8 +204,9 @@ function onMeetingEnded(): void {
   captionObserver?.stop();
   captionObserver = null;
 
-  speechCapture?.stop();
-  speechCapture = null;
+  // Parar SpeechRecognition no MAIN world
+  window.postMessage({ type: "MINA_STOP_SPEECH" }, "*");
+  speechActive = false;
 
   joyceAssistant?.reset();
   joyceAssistant = null;
@@ -198,31 +219,6 @@ function onMeetingEnded(): void {
   sendMessage({ type: "MEETING_ENDED" });
 
   removeRecordingIndicator();
-}
-
-/** Tenta extrair o nome do usuario local da interface do Meet */
-function extractLocalUserName(): string {
-  // Metodo 1: botao do perfil do usuario
-  const selfName = document.querySelector('[data-self-name]');
-  if (selfName) {
-    const name = selfName.getAttribute("data-self-name") || selfName.textContent?.trim();
-    if (name) return name;
-  }
-
-  // Metodo 2: titulo da pagina antes do " - Google Meet"
-  // Formato tipico: "Nome - Google Meet"
-  const pageTitle = document.title;
-  if (pageTitle && pageTitle.includes("Google Meet")) {
-    // Nao e o nome do usuario, e o titulo da reuniao
-  }
-
-  // Metodo 3: elemento do chat com "Voce" / "You"
-  const youLabel = document.querySelector('[data-sender-name="You"], [data-sender-name="Você"]');
-  if (youLabel) {
-    return youLabel.getAttribute("data-sender-name") === "You" ? "Eu" : "Eu";
-  }
-
-  return "Eu";
 }
 
 // ========== Indicadores Visuais da Joyce ==========
@@ -433,11 +429,11 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
       url: window.location.href,
       meetingDetectorActive: !!meetingDetector,
       captionObserverActive: !!captionObserver,
-      speechCaptureActive: !!speechCapture,
+      speechCaptureActive: speechActive,
       joyceAssistantActive: !!joyceAssistant,
       meetingStartTime: meetingStartTime > 0 ? new Date(meetingStartTime).toISOString() : null,
       currentTitle: currentMeetingTitle,
-      speechApiSupported: SpeechCapture.isSupported(),
+      speechApiSupported: true, // roda no MAIN world via audio-hook
       ariaLiveCount: document.querySelectorAll('[aria-live]').length,
       videoCount: document.querySelectorAll('video').length,
       buttonsWithAria: document.querySelectorAll('button[aria-label]').length,
