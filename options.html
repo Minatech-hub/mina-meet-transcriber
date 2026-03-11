@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mina Meet Transcriber - Configuracoes</title>
+  <style>
+    :root {
+      --bg: #0f0f0f;
+      --surface: #1a1a2e;
+      --border: #2a2a3e;
+      --text: #e0e0e0;
+      --text-muted: #888;
+      --green: #00d4aa;
+      --pink: #ff6b9d;
+      --red: #ef4444;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 14px;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: 40px 20px;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 500px;
+    }
+
+    h1 {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--green);
+      margin-bottom: 6px;
+    }
+
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 13px;
+      margin-bottom: 30px;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      font-size: 13px;
+      margin-bottom: 6px;
+      color: var(--text);
+    }
+
+    label small {
+      font-weight: 400;
+      color: var(--text-muted);
+    }
+
+    input[type="text"],
+    input[type="password"],
+    select {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input:focus, select:focus {
+      border-color: var(--green);
+    }
+
+    .checkbox-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .checkbox-group input[type="checkbox"] {
+      accent-color: var(--green);
+      width: 16px;
+      height: 16px;
+    }
+
+    .btn {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: var(--green);
+      color: #000;
+    }
+
+    .btn-primary:hover { opacity: 0.85; }
+
+    .btn-secondary {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      margin-left: 10px;
+    }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      margin-top: 30px;
+    }
+
+    .saved-msg {
+      color: var(--green);
+      font-size: 13px;
+      margin-left: 16px;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    .saved-msg.visible { opacity: 1; }
+
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 24px 0;
+    }
+
+    .info-box {
+      background: rgba(0, 212, 170, 0.05);
+      border: 1px solid rgba(0, 212, 170, 0.2);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .info-box code {
+      background: rgba(255,255,255,0.1);
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Mina Meet Transcriber</h1>
+    <p class="subtitle">Configure a conexao com a plataforma Minatech</p>
+
+    <form id="config-form">
+      <div class="form-group">
+        <label>URL da API <small>(Edge Function base URL)</small></label>
+        <input type="text" id="api-url" placeholder="https://xxx.supabase.co/functions/v1" />
+      </div>
+
+      <div class="form-group">
+        <label>API Key <small>(chave de autenticacao)</small></label>
+        <input type="password" id="api-key" placeholder="Sua chave de acesso" />
+      </div>
+
+      <hr class="divider" />
+
+      <div class="form-group">
+        <label>ID do Cliente <small>(UUID do cliente na Minatech)</small></label>
+        <input type="text" id="client-id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+      </div>
+
+      <div class="form-group">
+        <label>Nome do Cliente <small>(para exibicao)</small></label>
+        <input type="text" id="client-name" placeholder="Ex: Mina Tech" />
+      </div>
+
+      <hr class="divider" />
+
+      <div class="form-group">
+        <label>Idioma da Transcricao</label>
+        <select id="language">
+          <option value="pt-BR">Portugues (BR)</option>
+          <option value="en">English</option>
+          <option value="es">Espanol</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <div class="checkbox-group">
+          <input type="checkbox" id="auto-captions" />
+          <label for="auto-captions" style="margin-bottom:0;">Ativar legendas automaticamente ao entrar na reuniao</label>
+        </div>
+      </div>
+
+      <div class="info-box">
+        Para usar a extensao, voce precisa da <code>API Key</code> e do <code>Client ID</code>
+        fornecidos pelo administrador da sua plataforma Minatech. A extensao captura as legendas
+        (closed captions) do Google Meet e envia para a plataforma de forma segura.
+      </div>
+
+      <div class="actions">
+        <button type="submit" class="btn btn-primary">Salvar</button>
+        <button type="button" class="btn btn-secondary" id="btn-test">Testar Conexao</button>
+        <span class="saved-msg" id="saved-msg">Salvo!</span>
+      </div>
+    </form>
+  </div>
+
+  <script src="dist/options.js" type="module"></script>
+</body>
+</html>

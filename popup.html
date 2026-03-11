@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mina Meet Transcriber</title>
+  <style>
+    :root {
+      --bg: #0f0f0f;
+      --surface: #1a1a2e;
+      --border: #2a2a3e;
+      --text: #e0e0e0;
+      --text-muted: #888;
+      --green: #00d4aa;
+      --pink: #ff6b9d;
+      --red: #ef4444;
+      --yellow: #f59e0b;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      width: 320px;
+      min-height: 200px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      font-size: 13px;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    .header img { width: 28px; height: 28px; border-radius: 6px; }
+
+    .header .title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--green);
+    }
+
+    .header .subtitle {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .content { padding: 16px; }
+
+    .status-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .status-dot.active {
+      background: var(--red);
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+
+    .status-dot.inactive {
+      background: var(--text-muted);
+    }
+
+    .status-dot.success {
+      background: var(--green);
+    }
+
+    .status-dot.error {
+      background: var(--red);
+    }
+
+    .status-label {
+      font-weight: 600;
+      font-size: 13px;
+    }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .stat-item {
+      background: rgba(255,255,255,0.03);
+      border-radius: 8px;
+      padding: 10px;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--green);
+    }
+
+    .stat-label {
+      font-size: 10px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-top: 2px;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 10px;
+      border: none;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .btn-primary {
+      background: var(--green);
+      color: #000;
+    }
+
+    .btn-primary:hover { opacity: 0.85; }
+
+    .btn-secondary {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover {
+      background: var(--surface);
+      color: var(--text);
+    }
+
+    .btn-danger {
+      background: var(--red);
+      color: #fff;
+    }
+
+    .btn + .btn { margin-top: 8px; }
+
+    .no-config {
+      text-align: center;
+      padding: 20px;
+      color: var(--text-muted);
+    }
+
+    .no-config a {
+      color: var(--green);
+      text-decoration: none;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    .meeting-title {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .sync-status {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 10px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div class="title">Mina Meet Transcriber</div>
+      <div class="subtitle" id="client-name">Configurar...</div>
+    </div>
+  </div>
+
+  <div class="content">
+    <div id="no-config" class="no-config" style="display:none;">
+      <p>Extensao nao configurada.</p>
+      <p style="margin-top:8px;"><a href="#" id="open-options">Abrir Configuracoes</a></p>
+    </div>
+
+    <div id="main-content">
+      <div class="status-card">
+        <div class="status-row">
+          <div class="status-dot" id="status-dot"></div>
+          <span class="status-label" id="status-label">Inativo</span>
+        </div>
+        <div class="meeting-title" id="meeting-title"></div>
+
+        <div class="stat-grid">
+          <div class="stat-item">
+            <div class="stat-value" id="entries-count">0</div>
+            <div class="stat-label">Falas</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="participants-count">0</div>
+            <div class="stat-label">Participantes</div>
+          </div>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" id="btn-send" style="display:none;">
+        Enviar Agora
+      </button>
+
+      <button class="btn btn-secondary" id="btn-options">
+        Configuracoes
+      </button>
+
+      <div class="sync-status" id="sync-status"></div>
+    </div>
+  </div>
+
+  <script src="dist/popup.js" type="module"></script>
+</body>
+</html>

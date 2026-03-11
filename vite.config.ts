@@ -1,7 +1,19 @@
 import { defineConfig } from "vite";
 import { resolve } from "path";
+import { copyFileSync } from "fs";
 
 export default defineConfig({
+  plugins: [
+    {
+      name: "copy-content-css",
+      closeBundle() {
+        copyFileSync(
+          resolve(__dirname, "src/content/content.css"),
+          resolve(__dirname, "dist/content.css")
+        );
+      },
+    },
+  ],
   build: {
     outDir: "dist",
     emptyOutDir: true,
