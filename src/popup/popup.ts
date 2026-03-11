@@ -75,6 +75,56 @@ async function init() {
     document.getElementById("last-meeting-section")!.style.display = "none";
     document.getElementById("live-section")!.style.display = "block";
   });
+
+  // Joyce manual
+  const joyceInput = document.getElementById("joyce-input") as HTMLInputElement;
+  const btnJoyceSend = document.getElementById("btn-joyce-send");
+
+  btnJoyceSend?.addEventListener("click", () => sendJoyceManual());
+  joyceInput?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") sendJoyceManual();
+  });
+
+  async function sendJoyceManual() {
+    const command = joyceInput?.value?.trim();
+    if (!command) return;
+
+    const btn = btnJoyceSend as HTMLButtonElement;
+    btn.disabled = true;
+    btn.textContent = "...";
+
+    const responseDiv = document.getElementById("joyce-response")!;
+    responseDiv.style.display = "block";
+    responseDiv.innerHTML = '<span class="spinner"></span> Joyce pensando...';
+
+    try {
+      const result = await chrome.runtime.sendMessage({
+        type: "JOYCE_MANUAL_COMMAND",
+        data: { command },
+      });
+
+      if (result?.textResponse) {
+        responseDiv.innerHTML = `<div style="color:var(--pink);font-size:10px;font-weight:600;margin-bottom:4px;">JOYCE</div>${escapeHtml(result.textResponse)}`;
+
+        // Tocar audio se disponivel
+        if (result.audioUrl) {
+          try {
+            const audio = new Audio(result.audioUrl);
+            audio.volume = 0.9;
+            await audio.play();
+          } catch { /* silencioso */ }
+        }
+      } else {
+        responseDiv.innerHTML = `<span style="color:var(--red);">Erro: ${result?.error || "sem resposta"}</span>`;
+      }
+    } catch (err) {
+      responseDiv.innerHTML = `<span style="color:var(--red);">Erro de conexao</span>`;
+    }
+
+    btn.disabled = false;
+    btn.textContent = "Enviar";
+    joyceInput.value = "";
+  }
 }
 
 let lastMeetingCache: MeetingData | null = null;
@@ -106,9 +156,22 @@ async function updateUI() {
     participantsCount.textContent = String(meeting.participants.length);
     btnSend.style.display = "flex";
 
+    // Mostrar campo Joyce e diagnostico
+    document.getElementById("joyce-manual")!.style.display = "block";
+    document.getElementById("diagnostics")!.style.display = "block";
+
     // Calcular duracao em tempo real
     const elapsed = Math.floor((Date.now() - new Date(meeting.startedAt).getTime()) / 1000);
     durationDisplay.textContent = formatDuration(elapsed);
+
+    // Atualizar diagnostico
+    const diag = await chrome.runtime.sendMessage({ type: "GET_DIAGNOSTICS" }) as Record<string, string> | null;
+    if (diag) {
+      document.getElementById("diag-meeting")!.textContent = `Reuniao: ${diag.meeting}`;
+      document.getElementById("diag-captions")!.textContent = `Legendas: ${diag.captions}`;
+      document.getElementById("diag-joyce")!.textContent = `Joyce: ${diag.joyce}`;
+      document.getElementById("diag-audio")!.textContent = `Audio: ${diag.audio}`;
+    }
   } else {
     // Verificar se ha reuniao finalizada
     const lastMeeting = await chrome.runtime.sendMessage({ type: "GET_LAST_MEETING" }) as MeetingData | null;
@@ -128,6 +191,8 @@ async function updateUI() {
     } else {
       liveSection.style.display = "block";
       lastSection.style.display = "none";
+      document.getElementById("joyce-manual")!.style.display = "none";
+      document.getElementById("diagnostics")!.style.display = "none";
 
       statusDot.className = "status-dot inactive";
       statusLabel.textContent = "Inativo";

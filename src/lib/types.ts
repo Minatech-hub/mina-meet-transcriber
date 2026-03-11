@@ -52,7 +52,9 @@ export type Message =
   | { type: "GET_LAST_MEETING" }
   | { type: "GET_LAST_SUMMARY" }
   | { type: "GENERATE_SUMMARY" }
-  | { type: "CLEAR_LAST_MEETING" };
+  | { type: "CLEAR_LAST_MEETING" }
+  | { type: "JOYCE_MANUAL_COMMAND"; data: { command: string } }
+  | { type: "GET_DIAGNOSTICS" };
 
 /** Comando detectado para a Joyce durante a reuniao */
 export interface JoyceCommand {

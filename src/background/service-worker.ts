@@ -49,6 +49,10 @@ async function handleMessage(msg: Message, sender?: chrome.runtime.MessageSender
       await saveLastMeeting(null);
       await saveLastSummary(null);
       return { ok: true };
+    case "JOYCE_MANUAL_COMMAND":
+      return handleJoyceManualCommand(msg.data.command);
+    case "GET_DIAGNOSTICS":
+      return handleGetDiagnostics();
     default:
       return { ok: true };
   }
@@ -218,6 +222,33 @@ async function handleJoyceCommand(command: JoyceCommand, tabId?: number): Promis
       console.error("[Mina Meet SW] Erro ao enviar resposta Joyce:", err);
     });
   }
+}
+
+// ========== Joyce Manual (via popup) ==========
+
+async function handleJoyceManualCommand(command: string): Promise<JoyceResponse> {
+  const meeting = await getCurrentMeeting();
+  const meetingTitle = meeting?.title || "Reuniao";
+
+  const joyceCommand: JoyceCommand = {
+    speaker: "Administrador",
+    command,
+    recentContext: meeting?.entries?.slice(-10) || [],
+  };
+
+  return sendJoyceCommand(joyceCommand, meetingTitle);
+}
+
+async function handleGetDiagnostics(): Promise<Record<string, string>> {
+  const state = await getState();
+  const meeting = await getCurrentMeeting();
+
+  return {
+    meeting: state.isRecording ? `Ativa: ${meeting?.title || "?"}` : "Nenhuma",
+    captions: meeting ? `${meeting.entries.length} falas capturadas` : "Aguardando reuniao",
+    joyce: state.isRecording ? "Pronta (aguardando trigger nas legendas)" : "Inativa",
+    audio: state.isRecording ? "Verificar no console da pagina" : "Inativo",
+  };
 }
 
 // ========== Gerar Resumo IA ==========
