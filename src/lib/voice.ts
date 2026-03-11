@@ -1,92 +1,105 @@
 /**
  * Modulo de voz — reproduz respostas da Joyce por audio.
  *
- * Cadeia de fallback:
- * 1. Pipeline Meet (via audio-hook, todos na reuniao ouvem)
- * 2. Audio element local (new Audio, so o usuario ouve)
- * 3. Web Speech API (speechSynthesis, so o usuario ouve)
+ * Estrategia:
+ * 1. Se tem audioBase64 (ElevenLabs TTS): tocar localmente via Audio element
+ *    + tentar injetar no pipeline Meet (para todos ouvirem)
+ * 2. Se nao tem audio: usar Web Speech API (speechSynthesis)
  *
- * Cada passo tem logging para debug.
+ * Audio LOCAL (usuario ouve) e SEMPRE tocado primeiro.
+ * Pipeline Meet (todos ouvem) e tentado em paralelo como bonus.
  */
 
-import { injectJoyceAudio } from "@/content/audio-injector";
+import { tryInjectIntoMeetPipeline } from "@/content/audio-injector";
+
+// Pre-carregar vozes do speechSynthesis (Chrome bug: getVoices() retorna vazio no inicio)
+let voicesLoaded = false;
+if (typeof window !== "undefined" && "speechSynthesis" in window) {
+  const loadVoices = () => {
+    const voices = window.speechSynthesis.getVoices();
+    if (voices.length > 0) voicesLoaded = true;
+  };
+  loadVoices();
+  window.speechSynthesis.addEventListener("voiceschanged", loadVoices);
+}
 
 export async function playJoyceResponse(text: string, audioBase64?: string): Promise<void> {
   showSpeakingIndicator();
 
   try {
-    // === METODO 1: Pipeline do Meet (todos ouvem) ===
     if (audioBase64) {
-      try {
-        await injectJoyceAudio(audioBase64, text);
-        console.log("[Mina Voice] Audio reproduzido via pipeline Meet");
-        return;
-      } catch (err) {
-        console.warn("[Mina Voice] Pipeline falhou:", err);
-      }
+      // Tocar audio localmente (usuario ouve com certeza)
+      const localPromise = playAudioElement(audioBase64);
 
-      // === METODO 2: Audio element local ===
+      // Em paralelo, tentar injetar no Meet (todos ouvem)
+      tryInjectIntoMeetPipeline(audioBase64).catch((err) => {
+        console.warn("[Mina Voice] Pipeline Meet falhou (ok, audio local tocando):", err);
+      });
+
       try {
-        await playAudioElement(audioBase64);
-        console.log("[Mina Voice] Audio reproduzido via Audio element");
+        await localPromise;
+        console.log("[Mina Voice] Audio local reproduzido com sucesso");
         return;
       } catch (err) {
         console.warn("[Mina Voice] Audio element falhou:", err);
+        // Cair para speechSynthesis
       }
     }
 
-    // === METODO 3: Web Speech API (voz sintetizada) ===
-    try {
-      await speakWithSynthesis(text);
-      console.log("[Mina Voice] Audio reproduzido via speechSynthesis");
-      return;
-    } catch (err) {
-      console.warn("[Mina Voice] speechSynthesis falhou:", err);
-    }
-
-    console.error("[Mina Voice] TODOS os metodos de audio falharam!");
+    // Fallback: Web Speech API (voz sintetizada)
+    await speakWithSynthesis(text);
+    console.log("[Mina Voice] Audio reproduzido via speechSynthesis");
+  } catch (err) {
+    console.error("[Mina Voice] TODOS os metodos falharam:", err);
+    // Ultima tentativa: speechSynthesis direto, sem await
+    lastResortSpeak(text);
   } finally {
     hideSpeakingIndicator();
   }
 }
 
-/** Toca audio base64 via elemento Audio HTML5 */
+/** Toca audio base64 via elemento Audio HTML5 (usuario ouve localmente) */
 function playAudioElement(audioBase64: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const audio = new Audio();
-    audio.volume = 1.0;
+    try {
+      const audio = new Audio();
+      audio.volume = 1.0;
 
-    audio.oncanplaythrough = () => {
-      audio.play().then(() => {
-        console.log("[Mina Voice] Audio element tocando...");
-      }).catch((err) => {
-        console.error("[Mina Voice] Audio element play() rejeitado:", err);
-        reject(err);
-      });
-    };
+      const timeout = setTimeout(() => {
+        audio.pause();
+        audio.src = "";
+        reject(new Error("Audio element timeout (20s)"));
+      }, 20000);
 
-    audio.onended = () => {
-      console.log("[Mina Voice] Audio element finalizado");
-      resolve();
-    };
+      audio.onended = () => {
+        clearTimeout(timeout);
+        console.log("[Mina Voice] Audio element finalizado");
+        resolve();
+      };
 
-    audio.onerror = (e) => {
-      console.error("[Mina Voice] Audio element erro:", e);
-      reject(new Error("Audio element erro"));
-    };
+      audio.onerror = (e) => {
+        clearTimeout(timeout);
+        console.error("[Mina Voice] Audio element erro:", e);
+        reject(new Error("Audio element erro"));
+      };
 
-    // Timeout de seguranca
-    const timeout = setTimeout(() => {
-      reject(new Error("Audio element timeout (15s)"));
-    }, 15000);
+      // Definir src inicia o carregamento
+      audio.src = audioBase64;
 
-    audio.onended = () => {
-      clearTimeout(timeout);
-      resolve();
-    };
-
-    // Definir src por ultimo para iniciar o carregamento
-    audio.src = audioBase64;
+      // Tentar play assim que possivel
+      const playPromise = audio.play();
+      if (playPromise) {
+        playPromise
+          .then(() => console.log("[Mina Voice] Audio element tocando..."))
+          .catch((err) => {
+            clearTimeout(timeout);
+            console.error("[Mina Voice] Audio element play() rejeitado:", err);
+            reject(err);
+          });
+      }
+    } catch (err) {
+      reject(err);
+    }
   });
 }
 
@@ -120,15 +133,27 @@ function speakWithSynthesis(text: string): Promise<void> {
       reject(new Error("speechSynthesis timeout (30s)"));
     }, 30000);
 
+    // Chrome bug: speechSynthesis pode "pausar" em textos longos
+    // Workaround: manter alive com resume periodico
+    const keepAlive = setInterval(() => {
+      if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+        // tudo ok
+      } else if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+      }
+    }, 5000);
+
     utterance.onend = () => {
       clearTimeout(timeout);
+      clearInterval(keepAlive);
       resolve();
     };
 
     utterance.onerror = (e) => {
       clearTimeout(timeout);
+      clearInterval(keepAlive);
       // "interrupted" nao e erro real — pode acontecer ao cancelar
-      if (e.error === "interrupted") {
+      if (e.error === "interrupted" || e.error === "canceled") {
         resolve();
         return;
       }
@@ -137,7 +162,31 @@ function speakWithSynthesis(text: string): Promise<void> {
 
     window.speechSynthesis.speak(utterance);
     console.log("[Mina Voice] speechSynthesis iniciado:", text.substring(0, 50));
+
+    // Chrome bug: verificar se realmente comecou
+    setTimeout(() => {
+      if (!window.speechSynthesis.speaking && !window.speechSynthesis.pending) {
+        console.warn("[Mina Voice] speechSynthesis nao iniciou, tentando novamente");
+        window.speechSynthesis.speak(utterance);
+      }
+    }, 200);
   });
+}
+
+/** Ultima tentativa — fire and forget, sem promise */
+function lastResortSpeak(text: string): void {
+  try {
+    if ("speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = "pt-BR";
+      u.volume = 1.0;
+      window.speechSynthesis.speak(u);
+      console.log("[Mina Voice] lastResortSpeak disparado");
+    }
+  } catch {
+    // silencioso — nao ha mais o que fazer
+  }
 }
 
 // ========== Indicador visual ==========

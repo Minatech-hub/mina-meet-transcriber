@@ -60,39 +60,9 @@ async function onJoyceResponse(response: JoyceResponse): Promise<void> {
   // Mostrar texto na tela
   showJoyceTextBubble(response.textResponse);
 
-  // REPRODUZIR POR VOZ
-  try {
-    await playJoyceResponse(response.textResponse, response.audioUrl || undefined);
-    console.log("[Mina Joyce] Audio reproduzido");
-  } catch (err) {
-    console.error("[Mina Joyce] Erro audio principal:", err);
-    // Fallback: Web Speech API
-    try {
-      await speakFallback(response.textResponse);
-    } catch (err2) {
-      console.error("[Mina Joyce] Fallback falhou:", err2);
-    }
-  }
-}
-
-function speakFallback(text: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (!("speechSynthesis" in window)) {
-      reject(new Error("speechSynthesis indisponivel"));
-      return;
-    }
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = "pt-BR";
-    u.rate = 1.05;
-    u.volume = 1.0;
-    const voices = window.speechSynthesis.getVoices();
-    const pt = voices.find((v) => v.lang.startsWith("pt"));
-    if (pt) u.voice = pt;
-    u.onend = () => resolve();
-    u.onerror = (e) => reject(e);
-    window.speechSynthesis.speak(u);
-  });
+  // REPRODUZIR POR VOZ (voice.ts cuida de todos os fallbacks internamente)
+  await playJoyceResponse(response.textResponse, response.audioUrl || undefined);
+  console.log("[Mina Joyce] playJoyceResponse concluido");
 }
 
 function onMeetingStarted(title: string): void {

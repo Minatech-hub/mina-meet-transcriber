@@ -4,11 +4,8 @@
  * O audio-hook.ts roda no MAIN WORLD e intercepta o getUserMedia do Meet.
  * Este modulo roda no ISOLATED WORLD e se comunica via window.postMessage.
  *
- * Fluxo:
- * 1. Content script recebe audio da Joyce (base64 do backend)
- * 2. Este modulo envia via postMessage para o audio-hook
- * 3. O audio-hook decodifica e injeta no pipeline Web Audio
- * 4. O Meet transmite o audio mixado (mic + Joyce) para todos
+ * IMPORTANTE: Este modulo so cuida da INJECAO no pipeline Meet (para todos ouvirem).
+ * O audio LOCAL (para o usuario ouvir) e tratado em voice.ts via Audio element.
  */
 
 let audioReady = false;
@@ -20,15 +17,23 @@ window.addEventListener("message", (event) => {
 
   if (msg?.type === "MINA_AUDIO_READY_RESPONSE") {
     audioReady = msg.ready;
+    console.log("[Mina Injector] Pipeline Meet:", audioReady ? "PRONTO" : "NAO PRONTO");
   }
 });
 
 /** Verifica se o pipeline de audio no MAIN world esta pronto */
-export function isAudioPipelineReady(): Promise<boolean> {
+function isAudioPipelineReady(): Promise<boolean> {
   return new Promise((resolve) => {
+    // Primeiro check rapido via cache
+    if (audioReady) {
+      resolve(true);
+      return;
+    }
+
     const handler = (event: MessageEvent) => {
       if (event.data?.type === "MINA_AUDIO_READY_RESPONSE") {
         window.removeEventListener("message", handler);
+        clearTimeout(timer);
         resolve(event.data.ready);
       }
     };
@@ -36,120 +41,56 @@ export function isAudioPipelineReady(): Promise<boolean> {
     window.addEventListener("message", handler);
     window.postMessage({ type: "MINA_AUDIO_READY_CHECK" }, "*");
 
-    // Timeout de 1s
-    setTimeout(() => {
+    // Timeout de 2s
+    const timer = setTimeout(() => {
       window.removeEventListener("message", handler);
       resolve(false);
-    }, 1000);
+    }, 2000);
   });
 }
 
 /**
- * Injeta audio da Joyce no stream do Meet (todos ouvem).
- *
- * Se o audio do ElevenLabs estiver disponivel e o pipeline pronto,
- * injeta no stream. Caso contrario, faz fallback local.
+ * Tenta injetar audio da Joyce no stream do Meet (todos ouvem).
+ * Se pipeline nao estiver pronto, rejeita imediatamente.
+ * Chamado em paralelo pelo voice.ts — nao bloqueia audio local.
  */
-export async function injectJoyceAudio(audioBase64?: string, text?: string): Promise<void> {
-  // Se temos audio do ElevenLabs, tentar injetar no Meet
-  if (audioBase64) {
-    const ready = await isAudioPipelineReady();
+export async function tryInjectIntoMeetPipeline(audioBase64: string): Promise<void> {
+  const ready = await isAudioPipelineReady();
 
-    if (ready) {
-      console.log("[Mina Injector] Enviando audio para o pipeline (todos ouvem)");
+  if (!ready) {
+    throw new Error("Pipeline Meet nao pronto (mic nao ativo ou Meet nao interceptado)");
+  }
 
-      return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
+  console.log("[Mina Injector] Enviando audio para o pipeline Meet (todos ouvem)");
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      window.removeEventListener("message", handler);
+      reject(new Error("Timeout ao injetar audio no Meet (30s)"));
+    }, 30000);
+
+    const handler = (event: MessageEvent) => {
+      if (event.data?.type === "MINA_INJECT_AUDIO_RESULT") {
+        if (event.data.done || !event.data.success) {
+          clearTimeout(timeout);
           window.removeEventListener("message", handler);
-          reject(new Error("Timeout ao injetar audio"));
-        }, 30000); // 30s max para audio longo
-
-        const handler = (event: MessageEvent) => {
-          if (event.data?.type === "MINA_INJECT_AUDIO_RESULT") {
-            if (event.data.done || !event.data.success) {
-              clearTimeout(timeout);
-              window.removeEventListener("message", handler);
-              if (event.data.success) {
-                resolve();
-              } else {
-                reject(new Error(event.data.error || "Erro ao injetar audio"));
-              }
-            }
-            // Se playing=true, aguardar o done
+          if (event.data.success) {
+            console.log("[Mina Injector] Audio injetado no Meet com sucesso");
+            resolve();
+          } else {
+            reject(new Error(event.data.error || "Erro ao injetar audio no Meet"));
           }
-        };
+        }
+        // Se playing=true, aguardar o done
+      }
+    };
 
-        window.addEventListener("message", handler);
-        window.postMessage({ type: "MINA_INJECT_AUDIO", audioBase64 }, "*");
-      });
-    }
-
-    // Pipeline nao pronto — tocar audio ElevenLabs localmente (so o usuario ouve)
-    console.log("[Mina Injector] Pipeline nao pronto, tocando audio localmente");
-    return playAudioLocally(audioBase64);
-  }
-
-  // Fallback final: Web Speech API local (apenas o usuario ouve)
-  if (text) {
-    console.log("[Mina Injector] Fallback: Web Speech local");
-    return speakLocal(text);
-  }
-}
-
-/** Toca audio base64 localmente via elemento <audio> (apenas o usuario ouve) */
-function playAudioLocally(audioBase64: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    try {
-      const audio = new Audio(audioBase64);
-      audio.volume = 0.9;
-      audio.onended = () => {
-        console.log("[Mina Injector] Audio local finalizado");
-        resolve();
-      };
-      audio.onerror = (e) => {
-        console.error("[Mina Injector] Erro ao tocar audio local:", e);
-        reject(e);
-      };
-      audio.play().catch((err) => {
-        console.error("[Mina Injector] Erro ao iniciar audio local:", err);
-        reject(err);
-      });
-    } catch (err) {
-      reject(err);
-    }
+    window.addEventListener("message", handler);
+    window.postMessage({ type: "MINA_INJECT_AUDIO", audioBase64 }, "*");
   });
 }
 
-/** Web Speech API local (apenas o usuario ouve) */
-function speakLocal(text: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (!("speechSynthesis" in window)) {
-      reject(new Error("Web Speech API nao suportada"));
-      return;
-    }
-
-    window.speechSynthesis.cancel();
-
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = "pt-BR";
-    utterance.rate = 1.05;
-    utterance.pitch = 1.1;
-    utterance.volume = 0.85;
-
-    const voices = window.speechSynthesis.getVoices();
-    const ptVoice = voices.find((v) => v.lang.startsWith("pt"));
-    if (ptVoice) utterance.voice = ptVoice;
-
-    utterance.onend = () => resolve();
-    utterance.onerror = (e) => reject(e);
-
-    window.speechSynthesis.speak(utterance);
-  });
-}
-
-// Nao precisa mais da funcao installAudioInjector — o audio-hook.ts
-// roda direto como content script no MAIN world via manifest.json
+// No-op: o hook ja e carregado pelo manifest como script separado no MAIN world
 export function installAudioInjector(): void {
-  // No-op: o hook ja e carregado pelo manifest como script separado
   console.log("[Mina Injector] Audio hook carregado via manifest (MAIN world)");
 }
