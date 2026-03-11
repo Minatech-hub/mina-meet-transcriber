@@ -1,5 +1,5 @@
 import { Message, MeetingData, CaptionEntry, ExtensionState, JoyceCommand, JoyceResponse } from "@/lib/types";
-import { getState, saveState, getCurrentMeeting, saveCurrentMeeting, saveLastMeeting, getLastMeeting, saveLastSummary, getLastSummary } from "@/lib/storage";
+import { getConfig, getState, saveState, getCurrentMeeting, saveCurrentMeeting, saveLastMeeting, getLastMeeting, saveLastSummary, getLastSummary } from "@/lib/storage";
 import { saveTranscription, requestSummarize, sendJoyceCommand } from "@/lib/api";
 
 /**
@@ -260,7 +260,7 @@ async function handleGenerateSummary(): Promise<{ success: boolean; error?: stri
   }
 
   try {
-    const config = await (await import("@/lib/storage")).getConfig();
+    const config = await getConfig();
     const apiUrl = config.apiUrl;
     const apiKey = config.apiKey;
 

@@ -1,104 +1,154 @@
 /**
  * Modulo de voz — reproduz respostas da Joyce por audio.
  *
- * Modo principal: injeta audio no stream do Meet via Web Audio API
- *   → TODOS os participantes da reuniao ouvem
+ * Cadeia de fallback:
+ * 1. Pipeline Meet (via audio-hook, todos na reuniao ouvem)
+ * 2. Audio element local (new Audio, so o usuario ouve)
+ * 3. Web Speech API (speechSynthesis, so o usuario ouve)
  *
- * Fallback: Web Speech API local (se ElevenLabs indisponivel)
- *   → apenas o usuario local ouve
- *
- * O audio do ElevenLabs e gerado no backend (Edge Function) e enviado
- * como base64. O audio-injector decodifica e mixa com o microfone.
+ * Cada passo tem logging para debug.
  */
 
 import { injectJoyceAudio } from "@/content/audio-injector";
 
-/**
- * Reproduz a resposta da Joyce — injeta no stream do Meet para todos ouvirem.
- * Se nao for possivel injetar, faz fallback local.
- */
 export async function playJoyceResponse(text: string, audioBase64?: string): Promise<void> {
   showSpeakingIndicator();
 
   try {
-    // Tentar injetar no stream do Meet (todos ouvem)
-    await injectJoyceAudio(audioBase64, text);
-  } catch (err) {
-    console.error("[Mina Meet Voice] Erro ao injetar audio:", err);
-    // Fallback: tocar audio ElevenLabs localmente
+    // === METODO 1: Pipeline do Meet (todos ouvem) ===
     if (audioBase64) {
       try {
-        const audio = new Audio(audioBase64);
-        audio.volume = 0.9;
-        await audio.play();
-        await new Promise<void>((resolve) => { audio.onended = () => resolve(); });
-      } catch {
-        // Ultimo fallback: Web Speech local
-        try { await speakWithWebSpeechLocal(text); } catch { /* silencioso */ }
+        await injectJoyceAudio(audioBase64, text);
+        console.log("[Mina Voice] Audio reproduzido via pipeline Meet");
+        return;
+      } catch (err) {
+        console.warn("[Mina Voice] Pipeline falhou:", err);
       }
-    } else {
-      try { await speakWithWebSpeechLocal(text); } catch { /* silencioso */ }
+
+      // === METODO 2: Audio element local ===
+      try {
+        await playAudioElement(audioBase64);
+        console.log("[Mina Voice] Audio reproduzido via Audio element");
+        return;
+      } catch (err) {
+        console.warn("[Mina Voice] Audio element falhou:", err);
+      }
     }
+
+    // === METODO 3: Web Speech API (voz sintetizada) ===
+    try {
+      await speakWithSynthesis(text);
+      console.log("[Mina Voice] Audio reproduzido via speechSynthesis");
+      return;
+    } catch (err) {
+      console.warn("[Mina Voice] speechSynthesis falhou:", err);
+    }
+
+    console.error("[Mina Voice] TODOS os metodos de audio falharam!");
   } finally {
     hideSpeakingIndicator();
   }
 }
 
-/** Fallback: Web Speech API local (apenas o usuario ouve) */
-function speakWithWebSpeechLocal(text: string, lang = "pt-BR"): Promise<void> {
+/** Toca audio base64 via elemento Audio HTML5 */
+function playAudioElement(audioBase64: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    if (!("speechSynthesis" in window)) {
-      reject(new Error("Web Speech API nao suportada"));
-      return;
-    }
+    const audio = new Audio();
+    audio.volume = 1.0;
 
-    window.speechSynthesis.cancel();
+    audio.oncanplaythrough = () => {
+      audio.play().then(() => {
+        console.log("[Mina Voice] Audio element tocando...");
+      }).catch((err) => {
+        console.error("[Mina Voice] Audio element play() rejeitado:", err);
+        reject(err);
+      });
+    };
 
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = lang;
-    utterance.rate = 1.05;
-    utterance.pitch = 1.1;
-    utterance.volume = 0.85;
+    audio.onended = () => {
+      console.log("[Mina Voice] Audio element finalizado");
+      resolve();
+    };
 
-    const voices = window.speechSynthesis.getVoices();
-    const ptVoice = voices.find((v) => v.lang.startsWith("pt"));
-    if (ptVoice) utterance.voice = ptVoice;
+    audio.onerror = (e) => {
+      console.error("[Mina Voice] Audio element erro:", e);
+      reject(new Error("Audio element erro"));
+    };
 
-    utterance.onend = () => resolve();
-    utterance.onerror = (e) => reject(e);
+    // Timeout de seguranca
+    const timeout = setTimeout(() => {
+      reject(new Error("Audio element timeout (15s)"));
+    }, 15000);
 
-    window.speechSynthesis.speak(utterance);
+    audio.onended = () => {
+      clearTimeout(timeout);
+      resolve();
+    };
+
+    // Definir src por ultimo para iniciar o carregamento
+    audio.src = audioBase64;
   });
 }
 
-/** Indicador visual de que Joyce esta falando */
-function showSpeakingIndicator(): void {
-  let indicator = document.getElementById("mina-joyce-speaking");
-  if (indicator) return;
+/** Fala usando Web Speech API (speechSynthesis) */
+function speakWithSynthesis(text: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!("speechSynthesis" in window)) {
+      reject(new Error("speechSynthesis nao disponivel"));
+      return;
+    }
 
-  indicator = document.createElement("div");
-  indicator.id = "mina-joyce-speaking";
-  indicator.innerHTML = `
-    <div style="
-      position: fixed;
-      bottom: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 99999;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 12px 20px;
-      background: linear-gradient(135deg, rgba(0,212,170,0.95), rgba(255,107,157,0.95));
-      border-radius: 24px;
-      backdrop-filter: blur(12px);
-      font-family: 'Google Sans', Roboto, Arial, sans-serif;
-      font-size: 14px;
-      font-weight: 600;
-      color: #fff;
-      box-shadow: 0 8px 32px rgba(0,212,170,0.4);
-      animation: mina-joyce-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-    ">
+    // Cancelar qualquer fala anterior
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "pt-BR";
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+
+    // Buscar voz em portugues
+    const voices = window.speechSynthesis.getVoices();
+    const ptVoice = voices.find((v) => v.lang.startsWith("pt"));
+    if (ptVoice) {
+      utterance.voice = ptVoice;
+    }
+
+    // Timeout de seguranca (30s)
+    const timeout = setTimeout(() => {
+      window.speechSynthesis.cancel();
+      reject(new Error("speechSynthesis timeout (30s)"));
+    }, 30000);
+
+    utterance.onend = () => {
+      clearTimeout(timeout);
+      resolve();
+    };
+
+    utterance.onerror = (e) => {
+      clearTimeout(timeout);
+      // "interrupted" nao e erro real — pode acontecer ao cancelar
+      if (e.error === "interrupted") {
+        resolve();
+        return;
+      }
+      reject(new Error(`speechSynthesis erro: ${e.error}`));
+    };
+
+    window.speechSynthesis.speak(utterance);
+    console.log("[Mina Voice] speechSynthesis iniciado:", text.substring(0, 50));
+  });
+}
+
+// ========== Indicador visual ==========
+
+function showSpeakingIndicator(): void {
+  if (document.getElementById("mina-joyce-speaking")) return;
+
+  const el = document.createElement("div");
+  el.id = "mina-joyce-speaking";
+  el.innerHTML = `
+    <div style="position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:99999;display:flex;align-items:center;gap:10px;padding:12px 20px;background:linear-gradient(135deg,rgba(0,212,170,0.95),rgba(255,107,157,0.95));border-radius:24px;backdrop-filter:blur(12px);font-family:'Google Sans',Roboto,sans-serif;font-size:14px;font-weight:600;color:#fff;box-shadow:0 8px 32px rgba(0,212,170,0.4);animation:mina-joyce-in 0.4s cubic-bezier(0.34,1.56,0.64,1);">
       <div style="display:flex;gap:3px;align-items:center;">
         <div style="width:3px;height:12px;background:#fff;border-radius:2px;animation:mina-wave 0.8s ease-in-out infinite;"></div>
         <div style="width:3px;height:18px;background:#fff;border-radius:2px;animation:mina-wave 0.8s ease-in-out 0.1s infinite;"></div>
@@ -106,28 +156,21 @@ function showSpeakingIndicator(): void {
         <div style="width:3px;height:20px;background:#fff;border-radius:2px;animation:mina-wave 0.8s ease-in-out 0.3s infinite;"></div>
         <div style="width:3px;height:10px;background:#fff;border-radius:2px;animation:mina-wave 0.8s ease-in-out 0.4s infinite;"></div>
       </div>
-      <span>Joyce falando na reuniao...</span>
+      <span>Joyce falando...</span>
     </div>
     <style>
-      @keyframes mina-wave {
-        0%, 100% { transform: scaleY(1); }
-        50% { transform: scaleY(0.4); }
-      }
-      @keyframes mina-joyce-in {
-        from { opacity: 0; transform: translateX(-50%) translateY(20px) scale(0.8); }
-        to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
-      }
+      @keyframes mina-wave{0%,100%{transform:scaleY(1)}50%{transform:scaleY(0.4)}}
+      @keyframes mina-joyce-in{from{opacity:0;transform:translateX(-50%) translateY(20px) scale(0.8)}to{opacity:1;transform:translateX(-50%) translateY(0) scale(1)}}
     </style>
   `;
-
-  document.body.appendChild(indicator);
+  document.body.appendChild(el);
 }
 
 function hideSpeakingIndicator(): void {
-  const indicator = document.getElementById("mina-joyce-speaking");
-  if (indicator) {
-    indicator.style.opacity = "0";
-    indicator.style.transition = "opacity 0.3s ease";
-    setTimeout(() => indicator.remove(), 300);
+  const el = document.getElementById("mina-joyce-speaking");
+  if (el) {
+    el.style.opacity = "0";
+    el.style.transition = "opacity 0.3s";
+    setTimeout(() => el.remove(), 300);
   }
 }
