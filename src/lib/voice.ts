@@ -1,100 +1,66 @@
 /**
  * Modulo de voz — reproduz respostas da Joyce por audio.
  *
- * Duas estrategias:
- * 1. ElevenLabs API (qualidade alta, voz natural) — audio gerado no backend
- * 2. Web Speech API (fallback local, sem custo) — voz sintetizada no navegador
+ * Modo principal: injeta audio no stream do Meet via Web Audio API
+ *   → TODOS os participantes da reuniao ouvem
  *
- * O audio e reproduzido localmente no navegador do usuario (nao vai para o Meet).
+ * Fallback: Web Speech API local (se ElevenLabs indisponivel)
+ *   → apenas o usuario local ouve
+ *
+ * O audio do ElevenLabs e gerado no backend (Edge Function) e enviado
+ * como base64. O audio-injector decodifica e mixa com o microfone.
  */
 
-/** Reproduz audio a partir de base64 data URL */
-export function playAudioFromBase64(base64Audio: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const audio = new Audio(base64Audio);
-    audio.volume = 0.8;
-
-    audio.onended = () => resolve();
-    audio.onerror = (e) => reject(e);
-
-    audio.play().catch(reject);
-  });
-}
-
-/** Reproduz audio a partir de ArrayBuffer */
-export function playAudioFromBuffer(buffer: ArrayBuffer): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const blob = new Blob([buffer], { type: "audio/mpeg" });
-    const url = URL.createObjectURL(blob);
-    const audio = new Audio(url);
-    audio.volume = 0.8;
-
-    audio.onended = () => {
-      URL.revokeObjectURL(url);
-      resolve();
-    };
-    audio.onerror = (e) => {
-      URL.revokeObjectURL(url);
-      reject(e);
-    };
-
-    audio.play().catch(reject);
-  });
-}
+import { injectJoyceAudio } from "@/content/audio-injector";
 
 /**
- * Fallback: usa Web Speech API do navegador para falar o texto.
- * Funciona offline e sem custo, mas a voz e sintetica.
+ * Reproduz a resposta da Joyce — injeta no stream do Meet para todos ouvirem.
+ * Se nao for possivel injetar, faz fallback local.
  */
-export function speakWithWebSpeech(text: string, lang = "pt-BR"): Promise<void> {
+export async function playJoyceResponse(text: string, audioBase64?: string): Promise<void> {
+  showSpeakingIndicator();
+
+  try {
+    // Tentar injetar no stream do Meet (todos ouvem)
+    await injectJoyceAudio(audioBase64, text);
+  } catch (err) {
+    console.error("[Mina Meet Voice] Erro ao injetar audio:", err);
+    // Fallback final: Web Speech local
+    try {
+      await speakWithWebSpeechLocal(text);
+    } catch {
+      // Silencioso — ja logamos o erro
+    }
+  } finally {
+    hideSpeakingIndicator();
+  }
+}
+
+/** Fallback: Web Speech API local (apenas o usuario ouve) */
+function speakWithWebSpeechLocal(text: string, lang = "pt-BR"): Promise<void> {
   return new Promise((resolve, reject) => {
     if (!("speechSynthesis" in window)) {
       reject(new Error("Web Speech API nao suportada"));
       return;
     }
 
-    // Cancelar fala anterior se houver
     window.speechSynthesis.cancel();
 
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = lang;
-    utterance.rate = 1.05; // levemente mais rapido que o padrao
-    utterance.pitch = 1.1; // tom levemente mais alto (feminino)
+    utterance.rate = 1.05;
+    utterance.pitch = 1.1;
     utterance.volume = 0.85;
 
-    // Tentar encontrar uma voz feminina em portugues
     const voices = window.speechSynthesis.getVoices();
-    const ptFemale = voices.find(
-      (v) => v.lang.startsWith("pt") && v.name.toLowerCase().includes("female")
-    );
-    const ptVoice = ptFemale || voices.find((v) => v.lang.startsWith("pt"));
-    if (ptVoice) {
-      utterance.voice = ptVoice;
-    }
+    const ptVoice = voices.find((v) => v.lang.startsWith("pt"));
+    if (ptVoice) utterance.voice = ptVoice;
 
     utterance.onend = () => resolve();
     utterance.onerror = (e) => reject(e);
 
     window.speechSynthesis.speak(utterance);
   });
-}
-
-/**
- * Reproduz a resposta da Joyce — tenta audio do backend primeiro, fallback para Web Speech.
- */
-export async function playJoyceResponse(text: string, audioBase64?: string): Promise<void> {
-  // Mostrar indicador visual de que Joyce esta falando
-  showSpeakingIndicator();
-
-  try {
-    if (audioBase64) {
-      await playAudioFromBase64(audioBase64);
-    } else {
-      await speakWithWebSpeech(text);
-    }
-  } finally {
-    hideSpeakingIndicator();
-  }
 }
 
 /** Indicador visual de que Joyce esta falando */
@@ -126,13 +92,13 @@ function showSpeakingIndicator(): void {
       animation: mina-joyce-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
     ">
       <div style="display:flex;gap:3px;align-items:center;">
-        <div class="mina-wave-bar" style="width:3px;height:12px;background:#fff;border-radius:2px;animation:mina-wave 0.8s ease-in-out infinite;"></div>
-        <div class="mina-wave-bar" style="width:3px;height:18px;background:#fff;border-radius:2px;animation:mina-wave 0.8s ease-in-out 0.1s infinite;"></div>
-        <div class="mina-wave-bar" style="width:3px;height:14px;background:#fff;border-radius:2px;animation:mina-wave 0.8s ease-in-out 0.2s infinite;"></div>
-        <div class="mina-wave-bar" style="width:3px;height:20px;background:#fff;border-radius:2px;animation:mina-wave 0.8s ease-in-out 0.3s infinite;"></div>
-        <div class="mina-wave-bar" style="width:3px;height:10px;background:#fff;border-radius:2px;animation:mina-wave 0.8s ease-in-out 0.4s infinite;"></div>
+        <div style="width:3px;height:12px;background:#fff;border-radius:2px;animation:mina-wave 0.8s ease-in-out infinite;"></div>
+        <div style="width:3px;height:18px;background:#fff;border-radius:2px;animation:mina-wave 0.8s ease-in-out 0.1s infinite;"></div>
+        <div style="width:3px;height:14px;background:#fff;border-radius:2px;animation:mina-wave 0.8s ease-in-out 0.2s infinite;"></div>
+        <div style="width:3px;height:20px;background:#fff;border-radius:2px;animation:mina-wave 0.8s ease-in-out 0.3s infinite;"></div>
+        <div style="width:3px;height:10px;background:#fff;border-radius:2px;animation:mina-wave 0.8s ease-in-out 0.4s infinite;"></div>
       </div>
-      <span>Joyce esta falando...</span>
+      <span>Joyce falando na reuniao...</span>
     </div>
     <style>
       @keyframes mina-wave {

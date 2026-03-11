@@ -1,8 +1,14 @@
 import { CaptionObserver } from "./caption-observer";
 import { MeetingDetector } from "./meeting-detector";
 import { JoyceAssistant } from "./joyce-assistant";
+import { installAudioInjector } from "./audio-injector";
 import { CaptionEntry, JoyceCommand, JoyceResponse, Message } from "@/lib/types";
 import { playJoyceResponse } from "@/lib/voice";
+
+// CRITICO: instalar o interceptador de audio IMEDIATAMENTE,
+// antes do Google Meet chamar getUserMedia para o microfone.
+// Se instalar tarde demais, o Meet ja tera o stream original e Joyce nao sera ouvida.
+installAudioInjector();
 
 /**
  * Content Script principal — injeta no Google Meet.

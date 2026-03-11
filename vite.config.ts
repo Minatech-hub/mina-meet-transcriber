@@ -9,6 +9,7 @@ export default defineConfig({
       input: {
         background: resolve(__dirname, "src/background/service-worker.ts"),
         content: resolve(__dirname, "src/content/index.ts"),
+        "audio-hook": resolve(__dirname, "src/content/audio-hook.ts"),
         popup: resolve(__dirname, "src/popup/popup.ts"),
         options: resolve(__dirname, "src/options/options.ts"),
       },
