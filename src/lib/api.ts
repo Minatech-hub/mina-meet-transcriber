@@ -1,5 +1,5 @@
 import { getConfig } from "./storage";
-import { MeetingData, SaveResponse, SummarizeResponse } from "./types";
+import { MeetingData, SaveResponse, SummarizeResponse, JoyceCommand, JoyceResponse } from "./types";
 
 async function getHeaders(): Promise<Record<string, string>> {
   const config = await getConfig();
@@ -62,4 +62,45 @@ export async function requestSummarize(transcriptionId: string): Promise<Summari
   }
 
   return response.json();
+}
+
+/** Envia um comando para a Joyce IA processar */
+export async function sendJoyceCommand(
+  command: JoyceCommand,
+  meetingTitle: string
+): Promise<JoyceResponse> {
+  const baseUrl = await getBaseUrl();
+  const headers = await getHeaders();
+  const config = await getConfig();
+
+  try {
+    const response = await fetch(`${baseUrl}/meet-joyce-ai`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        client_id: config.clientId,
+        speaker: command.speaker,
+        command: command.command,
+        recent_context: command.recentContext,
+        meeting_title: meetingTitle,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      return {
+        success: false,
+        textResponse: "Desculpa, nao consegui processar. Tenta de novo?",
+        error: `HTTP ${response.status}: ${error}`,
+      };
+    }
+
+    return response.json();
+  } catch (err: unknown) {
+    return {
+      success: false,
+      textResponse: "Estou com problemas de conexao. Tenta de novo daqui a pouco?",
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
 }

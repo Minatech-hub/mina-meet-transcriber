@@ -1,6 +1,6 @@
-import { Message, MeetingData, CaptionEntry, ExtensionState } from "@/lib/types";
+import { Message, MeetingData, CaptionEntry, ExtensionState, JoyceCommand } from "@/lib/types";
 import { getState, saveState, getCurrentMeeting, saveCurrentMeeting } from "@/lib/storage";
-import { saveTranscription, requestSummarize } from "@/lib/api";
+import { saveTranscription, requestSummarize, sendJoyceCommand } from "@/lib/api";
 
 /**
  * Service Worker (Manifest V3) — gerencia o estado global da extensao.
@@ -16,14 +16,14 @@ const KEEPALIVE_ALARM = "mina-meet-keepalive";
 
 // ========== Handlers de Mensagens ==========
 
-chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
-  handleMessage(msg).then((response) => {
+chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
+  handleMessage(msg, sender).then((response) => {
     sendResponse(response);
   });
   return true; // manter canal aberto para resposta async
 });
 
-async function handleMessage(msg: Message): Promise<unknown> {
+async function handleMessage(msg: Message, sender?: chrome.runtime.MessageSender): Promise<unknown> {
   switch (msg.type) {
     case "MEETING_STARTED":
       return handleMeetingStarted(msg.data);
@@ -37,6 +37,8 @@ async function handleMessage(msg: Message): Promise<unknown> {
       return getState();
     case "SEND_NOW":
       return handleSendNow();
+    case "JOYCE_COMMAND":
+      return handleJoyceCommand(msg.data, sender?.tab?.id);
     default:
       return { ok: true };
   }
@@ -177,6 +179,30 @@ async function sendToBackend(
     await saveState({ lastSyncStatus: "error", lastError: errorMsg });
     updateBadge("ERR", "#ef4444");
     return { success: false, error: errorMsg };
+  }
+}
+
+// ========== Joyce IA ==========
+
+async function handleJoyceCommand(command: JoyceCommand, tabId?: number): Promise<void> {
+  const meeting = await getCurrentMeeting();
+  const meetingTitle = meeting?.title || "Reuniao";
+
+  console.log(`[Mina Meet SW] Joyce comando de ${command.speaker}: "${command.command}"`);
+
+  // Chamar backend da Joyce
+  const response = await sendJoyceCommand(command, meetingTitle);
+
+  console.log("[Mina Meet SW] Joyce resposta:", response.textResponse);
+
+  // Enviar resposta de volta para o content script
+  if (tabId) {
+    chrome.tabs.sendMessage(tabId, {
+      type: "JOYCE_RESPONSE",
+      data: response,
+    }).catch((err) => {
+      console.error("[Mina Meet SW] Erro ao enviar resposta Joyce:", err);
+    });
   }
 }
 

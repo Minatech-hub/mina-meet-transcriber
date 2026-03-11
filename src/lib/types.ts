@@ -46,7 +46,31 @@ export type Message =
   | { type: "GET_STATE" }
   | { type: "STATE_UPDATE"; data: ExtensionState }
   | { type: "SEND_NOW" }
-  | { type: "TOGGLE_RECORDING"; data: { enabled: boolean } };
+  | { type: "TOGGLE_RECORDING"; data: { enabled: boolean } }
+  | { type: "JOYCE_COMMAND"; data: JoyceCommand }
+  | { type: "JOYCE_RESPONSE"; data: JoyceResponse };
+
+/** Comando detectado para a Joyce durante a reuniao */
+export interface JoyceCommand {
+  speaker: string;
+  command: string; // texto completo apos "Joyce"
+  recentContext: CaptionEntry[]; // ultimas N falas para contexto
+}
+
+/** Resposta da Joyce ao processar um comando */
+export interface JoyceResponse {
+  success: boolean;
+  textResponse: string; // resposta em texto
+  audioUrl?: string; // URL do audio gerado (base64 data URL)
+  action?: JoyceAction;
+  error?: string;
+}
+
+/** Acao executada pela Joyce */
+export interface JoyceAction {
+  type: "task_created" | "question_answered" | "summary_requested" | "note_created";
+  details: Record<string, unknown>;
+}
 
 /** Resposta da Edge Function ao salvar */
 export interface SaveResponse {
