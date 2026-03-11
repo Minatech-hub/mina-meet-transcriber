@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "Mina Meet Transcriber",
+  "version": "1.0.0",
+  "description": "Transcreve reunioes do Google Meet automaticamente e integra com a plataforma Minatech",
+  "permissions": ["storage", "alarms", "activeTab"],
+  "host_permissions": ["https://meet.google.com/*"],
+  "background": {
+    "service_worker": "dist/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://meet.google.com/*"],
+      "js": ["dist/content.js"],
+      "css": ["dist/content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "assets/icon16.png",
+      "48": "assets/icon48.png",
+      "128": "assets/icon128.png"
+    }
+  },
+  "options_page": "options.html",
+  "icons": {
+    "16": "assets/icon16.png",
+    "48": "assets/icon48.png",
+    "128": "assets/icon128.png"
+  }
+}
