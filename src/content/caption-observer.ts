@@ -5,15 +5,15 @@ type CaptionCallback = (entry: CaptionEntry) => void;
 /**
  * Observa as legendas (closed captions) do Google Meet via MutationObserver.
  *
- * Estrategia robusta:
- * 1. Procura o container de legendas por multiplos metodos (classe, aria, heuristica)
- * 2. Monitora alteracoes no texto
- * 3. Debounce: quando o texto para de mudar por ~1.5s, emite como fala completa
- * 4. Deduplicar falas repetidas
- * 5. Polling de fallback caso o MutationObserver falhe
+ * Estrategia ultra-robusta com multiplas camadas de deteccao:
+ * 1. Monitoramento global de TODOS os novos elementos adicionados ao DOM
+ * 2. Deteccao por taxa de mudanca de texto (legendas mudam rapidamente)
+ * 3. Seletores conhecidos (com fallback)
+ * 4. Deteccao heuristica por posicao/estrutura
+ * 5. Logging detalhado para debug
  */
 export class CaptionObserver {
-  private bodyObserver: MutationObserver | null = null;
+  private globalObserver: MutationObserver | null = null;
   private captionObserver: MutationObserver | null = null;
   private callback: CaptionCallback;
   private meetingStartTime: number;
@@ -23,7 +23,10 @@ export class CaptionObserver {
   private captionContainer: Element | null = null;
   private pollInterval: ReturnType<typeof setInterval> | null = null;
   private searchAttempts = 0;
-  private maxSearchAttempts = 120; // 2 minutos de busca (a cada 1s)
+  private maxSearchAttempts = 300; // 5 minutos de busca (a cada 1s)
+
+  // Rastrear elementos com texto que muda para detectar legendas
+  private textChangeTracker = new Map<Element, { text: string; changes: number; firstSeen: number }>();
 
   constructor(callback: CaptionCallback, meetingStartTime: number) {
     this.callback = callback;
@@ -32,53 +35,72 @@ export class CaptionObserver {
 
   start(): void {
     console.log("[Mina Meet Captions] Iniciando observacao de legendas...");
+    console.log("[Mina Meet Captions] URL:", window.location.href);
 
-    // Tentar encontrar imediatamente
+    // Estrategia 1: Tentar encontrar container por seletores conhecidos
     this.findAndObserveCaptions();
 
-    // Se nao encontrou, fazer polling ativo (mais confiavel que MutationObserver no body)
-    if (!this.captionContainer) {
-      this.pollInterval = setInterval(() => {
-        this.searchAttempts++;
-        if (this.captionContainer) {
-          if (this.pollInterval) clearInterval(this.pollInterval);
-          return;
+    // Estrategia 2: Monitoramento global — observar TODOS os novos elementos
+    this.startGlobalMonitoring();
+
+    // Estrategia 3: Polling ativo para buscar container periodicamente
+    this.pollInterval = setInterval(() => {
+      this.searchAttempts++;
+
+      if (this.captionContainer) {
+        // Verificar se container ainda esta no DOM
+        if (!document.contains(this.captionContainer)) {
+          console.log("[Mina Meet Captions] Container removido do DOM, rebuscando...");
+          this.captionContainer = null;
+          this.captionObserver?.disconnect();
+          this.captionObserver = null;
+        } else {
+          return; // Tudo OK
         }
+      }
 
-        this.findAndObserveCaptions();
+      this.findAndObserveCaptions();
 
-        if (this.searchAttempts % 10 === 0) {
-          console.log(`[Mina Meet Captions] Buscando container de legendas... (tentativa ${this.searchAttempts})`);
-          // Tentar ativar legendas automaticamente
+      // A cada 5s, tentar ativar legendas e logar status
+      if (this.searchAttempts % 5 === 0) {
+        console.log(`[Mina Meet Captions] Buscando legendas... (${this.searchAttempts}s)`);
+        this.tryEnableCaptions();
+        this.logDOMStatus();
+      }
+
+      if (this.searchAttempts >= this.maxSearchAttempts) {
+        console.warn("[Mina Meet Captions] Container nao encontrado apos 5 minutos.");
+        // Continuar tentando mas com menor frequencia
+        if (this.pollInterval) clearInterval(this.pollInterval);
+        this.pollInterval = setInterval(() => {
+          this.findAndObserveCaptions();
           this.tryEnableCaptions();
-        }
-
-        if (this.searchAttempts >= this.maxSearchAttempts) {
-          console.warn("[Mina Meet Captions] Container nao encontrado apos 2 minutos. Legendas estao ativadas?");
-          if (this.pollInterval) clearInterval(this.pollInterval);
-        }
-      }, 1000);
-    }
+        }, 10000);
+      }
+    }, 1000);
   }
 
   stop(): void {
-    this.bodyObserver?.disconnect();
+    this.globalObserver?.disconnect();
     this.captionObserver?.disconnect();
     this.debounceTimers.forEach((timer) => clearTimeout(timer));
     this.debounceTimers.clear();
     if (this.pollInterval) clearInterval(this.pollInterval);
-    this.bodyObserver = null;
+    this.globalObserver = null;
     this.captionObserver = null;
     this.captionContainer = null;
     this.pollInterval = null;
+    this.textChangeTracker.clear();
   }
 
   /** Tenta ativar as legendas clicando no botao CC */
   tryEnableCaptions(): void {
+    // Metodo 1: Seletores por aria-label/data-tooltip
     const selectors = [
       // Portugues
       'button[aria-label*="legenda" i]',
       'button[aria-label*="Ativar legendas" i]',
+      'button[aria-label*="Mostrar legendas" i]',
       'button[data-tooltip*="legenda" i]',
       'button[data-tooltip*="Ativar legendas" i]',
       // Ingles
@@ -87,38 +109,236 @@ export class CaptionObserver {
       'button[aria-label*="Turn on captions" i]',
       'button[data-tooltip*="caption" i]',
       'button[data-tooltip*="Turn on captions" i]',
+      // Espanhol
+      'button[aria-label*="subtítulo" i]',
+      'button[aria-label*="subtitulo" i]',
     ];
 
     for (const sel of selectors) {
       const btn = document.querySelector(sel) as HTMLButtonElement | null;
       if (btn) {
-        // Verificar se ja esta ativado
         const pressed = btn.getAttribute("aria-pressed");
         if (pressed === "true") {
-          console.log("[Mina Meet Captions] Legendas ja estao ativadas");
+          console.log("[Mina Meet Captions] Legendas ja estao ativadas (aria-pressed=true)");
           return;
         }
+        console.log("[Mina Meet Captions] Clicando botao de legendas:", sel);
         btn.click();
-        console.log("[Mina Meet Captions] Legendas ativadas automaticamente via:", sel);
         return;
       }
     }
 
-    // Fallback: procurar por botao com icone de CC nos controles inferiores
-    const bottomBar = document.querySelector('[jscontroller][jsname]');
-    if (bottomBar) {
-      const buttons = bottomBar.querySelectorAll("button");
-      for (const btn of buttons) {
-        const label = (btn.getAttribute("aria-label") || btn.getAttribute("data-tooltip") || "").toLowerCase();
-        if (label.includes("cc") || label.includes("legenda") || label.includes("caption") || label.includes("subtitle")) {
-          if (btn.getAttribute("aria-pressed") !== "true") {
-            btn.click();
-            console.log("[Mina Meet Captions] Legendas ativadas via fallback:", label);
+    // Metodo 2: Procurar botoes na barra inferior por texto/SVG
+    const allButtons = document.querySelectorAll("button");
+    for (const btn of allButtons) {
+      const label = (
+        btn.getAttribute("aria-label") ||
+        btn.getAttribute("data-tooltip") ||
+        btn.textContent ||
+        ""
+      ).toLowerCase();
+
+      if (
+        label.includes("cc") ||
+        label.includes("legenda") ||
+        label.includes("caption") ||
+        label.includes("subtitle") ||
+        label.includes("subtítulo")
+      ) {
+        if (btn.getAttribute("aria-pressed") !== "true") {
+          console.log("[Mina Meet Captions] Ativando legendas via botao encontrado:", label);
+          btn.click();
+          return;
+        } else {
+          console.log("[Mina Meet Captions] Botao de legendas ja ativo:", label);
+          return;
+        }
+      }
+    }
+
+    // Metodo 3: atalho de teclado (Ctrl+C no Meet ativa/desativa legendas)
+    // Nota: nem sempre funciona dependendo do foco
+    console.log("[Mina Meet Captions] Nenhum botao de legendas encontrado. Tentando atalho Ctrl+C...");
+    try {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "c",
+          code: "KeyC",
+          ctrlKey: false, // No Meet, e apenas "c" sem Ctrl
+          bubbles: true,
+        })
+      );
+    } catch (_e) {
+      // Ignorar erros do atalho
+    }
+  }
+
+  /** Monitoramento global do DOM — detecta containers de legendas quando aparecem */
+  private startGlobalMonitoring(): void {
+    this.globalObserver = new MutationObserver((mutations) => {
+      if (this.captionContainer) return; // Ja encontrou
+
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          if (node instanceof HTMLElement) {
+            this.checkIfCaptionContainer(node);
+          }
+        }
+
+        // Tambem checar mudancas de texto em elementos existentes
+        if (mutation.type === "characterData" && mutation.target.parentElement) {
+          this.trackTextChange(mutation.target.parentElement);
+        }
+      }
+    });
+
+    this.globalObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      characterDataOldValue: true,
+    });
+  }
+
+  /** Rastreia mudancas de texto para identificar legendas (mudam com alta frequencia) */
+  private trackTextChange(el: Element): void {
+    if (this.captionContainer) return;
+
+    // Subir ate o container pai relevante (max 5 niveis)
+    let container = el;
+    for (let i = 0; i < 5; i++) {
+      const parent = container.parentElement;
+      if (!parent || parent === document.body) break;
+
+      // Se o pai tem posicao fixa/absoluta e esta na parte inferior, usar ele
+      const style = window.getComputedStyle(parent);
+      if (style.position === "fixed" || style.position === "absolute") {
+        const rect = parent.getBoundingClientRect();
+        if (rect.top > window.innerHeight * 0.5) {
+          container = parent;
+          break;
+        }
+      }
+      container = parent;
+    }
+
+    const now = Date.now();
+    const tracker = this.textChangeTracker.get(container);
+    const currentText = container.textContent?.trim() || "";
+
+    if (tracker) {
+      if (tracker.text !== currentText) {
+        tracker.text = currentText;
+        tracker.changes++;
+
+        // Se o texto mudou 3+ vezes em 10s, provavelmente e legenda
+        if (tracker.changes >= 3 && now - tracker.firstSeen < 10000) {
+          console.log(
+            `[Mina Meet Captions] Detectado elemento com texto dinamico (${tracker.changes} mudancas):`,
+            currentText.substring(0, 80)
+          );
+          this.attachObserver(container, "deteccao por taxa de mudanca");
+          this.textChangeTracker.clear();
+        }
+      }
+    } else {
+      this.textChangeTracker.set(container, {
+        text: currentText,
+        changes: 1,
+        firstSeen: now,
+      });
+    }
+
+    // Limpar trackers antigos
+    if (this.textChangeTracker.size > 50) {
+      for (const [key, val] of this.textChangeTracker) {
+        if (now - val.firstSeen > 15000) {
+          this.textChangeTracker.delete(key);
+        }
+      }
+    }
+  }
+
+  /** Verifica se um elemento recem-adicionado e um container de legendas */
+  private checkIfCaptionContainer(el: HTMLElement): void {
+    if (this.captionContainer) return;
+
+    // Verificar o elemento e todos os seus filhos
+    const candidates = [el, ...Array.from(el.querySelectorAll("div"))];
+
+    for (const candidate of candidates) {
+      // Check 1: Tem aria-live=polite (padrao de acessibilidade para legendas)
+      if (candidate.getAttribute("aria-live") === "polite") {
+        const text = candidate.textContent?.trim() || "";
+        if (text.length > 0 && text.length < 500) {
+          this.attachObserver(candidate, "aria-live=polite (novo elemento)");
+          return;
+        }
+      }
+
+      // Check 2: Classes conhecidas do Meet
+      const className = candidate.className || "";
+      if (
+        typeof className === "string" &&
+        (className.includes("iOzk7") ||
+          className.includes("a4cQT") ||
+          className.includes("TBMuR") ||
+          className.includes("bh44bd") ||
+          className.includes("Mz6pEf") ||
+          className.includes("iTTPOb"))
+      ) {
+        this.attachObserver(candidate, `classe conhecida: ${className}`);
+        return;
+      }
+
+      // Check 3: Posicao na parte inferior + conteudo de texto
+      const rect = candidate.getBoundingClientRect();
+      if (
+        rect.top > window.innerHeight * 0.65 &&
+        rect.height > 20 &&
+        rect.height < 300 &&
+        candidate.children.length > 0 &&
+        candidate.children.length < 15
+      ) {
+        const text = candidate.textContent?.trim() || "";
+        if (text.length > 3 && text.length < 500) {
+          // Provavelmente legenda — verificar se tem estrutura de nome:texto
+          if (this.hasNameTextStructure(candidate)) {
+            this.attachObserver(candidate, "heuristica novo elemento (posicao + estrutura)");
             return;
           }
         }
       }
     }
+  }
+
+  /** Verifica se um elemento tem estrutura de legenda (nome + texto) */
+  private hasNameTextStructure(el: Element): boolean {
+    // Padrao 1: filhos com texto curto (nome) + texto longo (fala)
+    const children = Array.from(el.children);
+    if (children.length >= 2) {
+      const first = children[0].textContent?.trim() || "";
+      const second = children.slice(1).map(c => c.textContent?.trim()).join(" ");
+      if (first.length > 1 && first.length < 50 && second.length > 2) {
+        return true;
+      }
+    }
+
+    // Padrao 2: texto contem ":" (Nome: texto)
+    const text = el.textContent?.trim() || "";
+    const colonIdx = text.indexOf(":");
+    if (colonIdx > 0 && colonIdx < 50 && text.length > colonIdx + 3) {
+      return true;
+    }
+
+    // Padrao 3: tem spans/divs com textos separados
+    const spans = el.querySelectorAll("span, div");
+    if (spans.length >= 2) {
+      const texts = Array.from(spans).map(s => s.textContent?.trim()).filter(Boolean);
+      if (texts.length >= 2) return true;
+    }
+
+    return false;
   }
 
   private findAndObserveCaptions(): void {
@@ -128,12 +348,17 @@ export class CaptionObserver {
       'div[class*="a4cQT"]',
       'div[class*="TBMuR"]',
       'div[class*="bh44bd"]',
+      'div[class*="Mz6pEf"]',
+      'div[class*="iTTPOb"]',
+      // Seletores por jsname (mais estaveis que classes)
+      'div[jsname="tgaKEf"]',
+      'div[jsname="dsyhDe"]',
     ];
 
     for (const sel of classSelectors) {
       const el = document.querySelector(sel);
       if (el && this.looksLikeCaptionContainer(el)) {
-        this.attachObserver(el, `classe ${sel}`);
+        this.attachObserver(el, `seletor ${sel}`);
         return;
       }
     }
@@ -147,33 +372,47 @@ export class CaptionObserver {
       }
     }
 
-    // Estrategia 3: heuristica — procurar container fixo na parte inferior com texto dinamico
+    // Estrategia 3: aria-live="assertive"
+    const ariaAssertive = document.querySelectorAll('[aria-live="assertive"]');
+    for (const el of ariaAssertive) {
+      if (this.looksLikeCaptionContainer(el)) {
+        this.attachObserver(el, "aria-live=assertive");
+        return;
+      }
+    }
+
+    // Estrategia 4: role="region" com conteudo de texto
+    const regions = document.querySelectorAll('[role="region"]');
+    for (const el of regions) {
+      const rect = el.getBoundingClientRect();
+      if (rect.top > window.innerHeight * 0.5 && this.looksLikeCaptionContainer(el)) {
+        this.attachObserver(el, 'role="region"');
+        return;
+      }
+    }
+
+    // Estrategia 5: heuristica por posicao — container fixo/absoluto na parte inferior
     const allDivs = document.querySelectorAll("div");
     for (const div of allDivs) {
-      const style = window.getComputedStyle(div);
-      // Container de legendas normalmente e fixed/absolute na parte inferior
+      const rect = div.getBoundingClientRect();
+
+      // Container de legendas normalmente esta na parte inferior da tela
       if (
-        (style.position === "fixed" || style.position === "absolute") &&
-        parseInt(style.bottom || "999") < 200 &&
-        div.children.length > 0 &&
-        div.children.length < 10 &&
-        div.textContent &&
-        div.textContent.length > 5 &&
-        div.textContent.length < 500
+        rect.top > window.innerHeight * 0.65 &&
+        rect.top < window.innerHeight - 10 &&
+        rect.height > 20 &&
+        rect.height < 250 &&
+        rect.width > window.innerWidth * 0.2
       ) {
-        // Verificar se tem estrutura de legenda (nome: texto)
-        const text = div.textContent;
-        if (text.includes(":") || div.querySelector("span, img")) {
-          // Possivel container de legendas
-          const hasNameAndText = Array.from(div.querySelectorAll("div, span")).some(
-            (child) => {
-              const ct = child.textContent?.trim() || "";
-              return ct.length > 2 && ct.length < 50;
+        const style = window.getComputedStyle(div);
+        // Geralmente fixed ou absolute
+        if (style.position === "fixed" || style.position === "absolute") {
+          const text = div.textContent?.trim() || "";
+          if (text.length > 3 && text.length < 500 && div.children.length > 0 && div.children.length < 15) {
+            if (this.hasNameTextStructure(div)) {
+              this.attachObserver(div, "heuristica posicao inferior");
+              return;
             }
-          );
-          if (hasNameAndText) {
-            this.attachObserver(div, "heuristica posicao/conteudo");
-            return;
           }
         }
       }
@@ -182,28 +421,42 @@ export class CaptionObserver {
 
   /** Verifica se um elemento parece ser um container de legendas */
   private looksLikeCaptionContainer(el: Element): boolean {
-    // Deve ter conteudo de texto
     const text = el.textContent?.trim() || "";
-    if (text.length === 0) {
-      // Container vazio pode ainda nao ter legendas, mas verificar se tem filhos
-      return el.children.length > 0;
+
+    // Container vazio com filhos — pode ser o container esperando legendas
+    if (text.length === 0 && el.children.length > 0) {
+      return true;
     }
+
     // Nao deve ser um elemento enorme (tipo o body)
     if (text.length > 1000) return false;
+
+    // Verificar posicao — legendas ficam na parte inferior
+    const rect = el.getBoundingClientRect();
+    if (rect.height > 0 && rect.top < window.innerHeight * 0.3) {
+      // Muito acima na tela — provavelmente nao e legenda
+      // A menos que seja um overlay
+      const style = window.getComputedStyle(el);
+      if (style.position !== "fixed" && style.position !== "absolute") {
+        return false;
+      }
+    }
+
     return true;
   }
 
   private attachObserver(container: Element, method: string): void {
+    if (this.captionContainer === container) return; // Ja observando este
+
     this.captionContainer = container;
-    if (this.pollInterval) {
-      clearInterval(this.pollInterval);
-      this.pollInterval = null;
-    }
+    this.captionObserver?.disconnect();
 
-    console.log(`[Mina Meet Captions] Container encontrado via ${method}`);
+    console.log(`[Mina Meet Captions] ✓ Container encontrado via ${method}`);
+    console.log(`[Mina Meet Captions] Container:`, container.tagName, container.className);
+    console.log(`[Mina Meet Captions] Conteudo atual:`, (container.textContent || "").substring(0, 100));
 
-    this.captionObserver = new MutationObserver((mutations) => {
-      this.handleCaptionMutations(mutations);
+    this.captionObserver = new MutationObserver(() => {
+      this.processCaptionContent();
     });
 
     this.captionObserver.observe(container, {
@@ -217,25 +470,15 @@ export class CaptionObserver {
     this.processCaptionContent();
   }
 
-  private handleCaptionMutations(_mutations: MutationRecord[]): void {
-    this.processCaptionContent();
-  }
-
   private processCaptionContent(): void {
     if (!this.captionContainer) return;
 
-    // Tentar extrair falas de todos os blocos filhos
-    const blocks = this.captionContainer.querySelectorAll("div");
-    const processed = new Set<string>();
+    // Tentar extrair falas de todos os blocos
+    // Abordagem: pegar os "leaf blocks" — divs que contem texto mas nao contem outros divs com texto
+    const entries = this.extractAllCaptionEntries(this.captionContainer);
 
-    blocks.forEach((block) => {
-      // Evitar processar sub-blocos
-      if (processed.has(block.textContent || "")) return;
-
-      const { speaker, text } = this.extractSpeakerAndText(block);
-      if (!speaker || !text || text.length < 2) return;
-
-      processed.add(block.textContent || "");
+    for (const { speaker, text } of entries) {
+      if (!speaker || !text || text.length < 2) continue;
 
       const key = speaker;
       const currentText = this.lastTexts.get(key);
@@ -255,7 +498,43 @@ export class CaptionObserver {
           }, 1500)
         );
       }
-    });
+    }
+  }
+
+  /** Extrai todas as entradas de legenda de um container */
+  private extractAllCaptionEntries(container: Element): Array<{ speaker: string; text: string }> {
+    const results: Array<{ speaker: string; text: string }> = [];
+
+    // Abordagem 1: procurar blocos filhos diretos que parecem legendas individuais
+    const directChildren = Array.from(container.children);
+    for (const child of directChildren) {
+      if (child instanceof HTMLElement) {
+        const entry = this.extractSpeakerAndText(child);
+        if (entry.speaker && entry.text && entry.text.length >= 2) {
+          results.push(entry);
+        } else {
+          // Tentar um nivel mais fundo
+          for (const grandchild of child.children) {
+            if (grandchild instanceof HTMLElement) {
+              const entry2 = this.extractSpeakerAndText(grandchild);
+              if (entry2.speaker && entry2.text && entry2.text.length >= 2) {
+                results.push(entry2);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Se nao encontrou nada, tentar o container inteiro como uma unica legenda
+    if (results.length === 0) {
+      const entry = this.extractSpeakerAndText(container);
+      if (entry.speaker && entry.text) {
+        results.push(entry);
+      }
+    }
+
+    return results;
   }
 
   private extractSpeakerAndText(block: Element): { speaker: string; text: string } {
@@ -287,17 +566,39 @@ export class CaptionObserver {
         if (t) textParts.push(t);
       }
       const text = textParts.join(" ");
-      if (speaker && text) return { speaker, text };
+      if (speaker && text && speaker.length < 60) return { speaker, text };
     }
 
-    // Padrao 3: formato "Nome: texto"
+    // Padrao 3: imagem + div com nome + div com texto
+    const img = block.querySelector("img");
+    if (img) {
+      const divs = Array.from(block.querySelectorAll("div")).filter(
+        (d) => d.textContent?.trim() && d.children.length === 0
+      );
+      if (divs.length >= 2) {
+        return {
+          speaker: divs[0].textContent?.trim() || "",
+          text: divs.slice(1).map(d => d.textContent?.trim()).join(" "),
+        };
+      }
+    }
+
+    // Padrao 4: formato "Nome: texto"
     const fullText = block.textContent?.trim() || "";
     const colonIndex = fullText.indexOf(":");
     if (colonIndex > 0 && colonIndex < 50) {
-      return {
-        speaker: fullText.slice(0, colonIndex).trim(),
-        text: fullText.slice(colonIndex + 1).trim(),
-      };
+      const speaker = fullText.slice(0, colonIndex).trim();
+      const text = fullText.slice(colonIndex + 1).trim();
+      if (speaker && text) return { speaker, text };
+    }
+
+    // Padrao 5: Apenas texto (sem speaker identificavel) — usar "Participante"
+    if (fullText.length > 3 && fullText.length < 300 && children.length === 0) {
+      // Verificar se nao e um botao ou label
+      const tag = block.tagName.toLowerCase();
+      if (tag !== "button" && tag !== "label" && tag !== "a") {
+        return { speaker: "Participante", text: fullText };
+      }
     }
 
     return { speaker: "", text: "" };
@@ -320,7 +621,45 @@ export class CaptionObserver {
       capturedAt: new Date().toISOString(),
     };
 
-    console.log(`[Mina Meet Captions] ${speaker}: "${text}"`);
+    console.log(`[Mina Meet Captions] ✓ Capturado — ${speaker}: "${text}"`);
     this.callback(entry);
+  }
+
+  /** Log detalhado do estado do DOM para debug */
+  private logDOMStatus(): void {
+    // Contar elementos relevantes
+    const ariaLive = document.querySelectorAll('[aria-live]');
+    const regions = document.querySelectorAll('[role="region"]');
+    const videos = document.querySelectorAll('video');
+    const fixedElements: string[] = [];
+
+    // Procurar elementos fixed na parte inferior com texto
+    document.querySelectorAll('div').forEach((div) => {
+      const rect = div.getBoundingClientRect();
+      if (rect.top > window.innerHeight * 0.6 && rect.height > 15 && rect.height < 300) {
+        const style = window.getComputedStyle(div);
+        if (style.position === "fixed" || style.position === "absolute") {
+          const text = div.textContent?.trim() || "";
+          if (text.length > 0 && text.length < 200) {
+            fixedElements.push(`[${div.tagName}.${div.className?.substring?.(0, 30) || ""}] "${text.substring(0, 50)}"`);
+          }
+        }
+      }
+    });
+
+    console.log("[Mina Meet Captions] === STATUS DOM ===");
+    console.log(`  aria-live elements: ${ariaLive.length}`);
+    console.log(`  role=region elements: ${regions.length}`);
+    console.log(`  videos: ${videos.length}`);
+    console.log(`  fixed/abs na parte inferior: ${fixedElements.length}`);
+    if (fixedElements.length > 0) {
+      fixedElements.forEach(f => console.log(`    → ${f}`));
+    }
+
+    // Listar aria-live elements
+    ariaLive.forEach(el => {
+      const text = el.textContent?.trim() || "(vazio)";
+      console.log(`  aria-live="${el.getAttribute('aria-live')}": ${el.tagName}.${(el.className || "").substring(0, 30)} → "${text.substring(0, 80)}"`);
+    });
   }
 }

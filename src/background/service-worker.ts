@@ -1,4 +1,4 @@
-import { Message, MeetingData, CaptionEntry, ExtensionState, JoyceCommand } from "@/lib/types";
+import { Message, MeetingData, CaptionEntry, ExtensionState, JoyceCommand, JoyceResponse } from "@/lib/types";
 import { getState, saveState, getCurrentMeeting, saveCurrentMeeting, saveLastMeeting, getLastMeeting, saveLastSummary, getLastSummary } from "@/lib/storage";
 import { saveTranscription, requestSummarize, sendJoyceCommand } from "@/lib/api";
 

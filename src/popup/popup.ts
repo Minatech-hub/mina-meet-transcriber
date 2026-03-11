@@ -76,6 +76,46 @@ async function init() {
     document.getElementById("live-section")!.style.display = "block";
   });
 
+  // Forcar legendas
+  document.getElementById("btn-force-captions")?.addEventListener("click", async () => {
+    const btn = document.getElementById("btn-force-captions") as HTMLButtonElement;
+    btn.textContent = "Ativando...";
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id) {
+        await chrome.tabs.sendMessage(tab.id, { type: "FORCE_ENABLE_CAPTIONS" });
+        btn.textContent = "Enviado!";
+      } else {
+        btn.textContent = "Sem tab Meet";
+      }
+    } catch {
+      btn.textContent = "Erro (sem Meet?)";
+    }
+    setTimeout(() => { btn.textContent = "CC Forcar Legendas"; }, 2000);
+  });
+
+  // Atualizar diagnostico manual
+  document.getElementById("btn-refresh-diag")?.addEventListener("click", async () => {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id) {
+        const diag = await chrome.tabs.sendMessage(tab.id, { type: "GET_CONTENT_DIAGNOSTICS" });
+        if (diag) {
+          document.getElementById("diag-meeting")!.textContent =
+            `Reuniao: ${diag.currentTitle || "Nao detectada"} (detector: ${diag.meetingDetectorActive ? "ON" : "OFF"})`;
+          document.getElementById("diag-captions")!.textContent =
+            `Legendas: observer=${diag.captionObserverActive ? "ON" : "OFF"} | aria-live=${diag.ariaLiveCount} | videos=${diag.videoCount}`;
+          document.getElementById("diag-joyce")!.textContent =
+            `Joyce: ${diag.joyceAssistantActive ? "Ativa" : "Inativa"}`;
+          document.getElementById("diag-audio")!.textContent =
+            `Botoes com aria: ${diag.buttonsWithAria}`;
+        }
+      }
+    } catch {
+      document.getElementById("diag-meeting")!.textContent = "Erro ao obter diagnostico do content script";
+    }
+  });
+
   // Joyce manual
   const joyceInput = document.getElementById("joyce-input") as HTMLInputElement;
   const btnJoyceSend = document.getElementById("btn-joyce-send");

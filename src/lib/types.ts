@@ -54,7 +54,9 @@ export type Message =
   | { type: "GENERATE_SUMMARY" }
   | { type: "CLEAR_LAST_MEETING" }
   | { type: "JOYCE_MANUAL_COMMAND"; data: { command: string } }
-  | { type: "GET_DIAGNOSTICS" };
+  | { type: "GET_DIAGNOSTICS" }
+  | { type: "FORCE_ENABLE_CAPTIONS" }
+  | { type: "GET_CONTENT_DIAGNOSTICS" };
 
 /** Comando detectado para a Joyce durante a reuniao */
 export interface JoyceCommand {

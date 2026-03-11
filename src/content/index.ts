@@ -349,6 +349,29 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
     sendResponse({ ok: true });
   }
 
+  // Forcar ativacao de legendas
+  if (msg.type === "FORCE_ENABLE_CAPTIONS") {
+    console.log("[Mina Meet] Forcando ativacao de legendas via popup...");
+    captionObserver?.tryEnableCaptions();
+    sendResponse({ ok: true });
+  }
+
+  // Diagnostico detalhado do content script
+  if (msg.type === "GET_CONTENT_DIAGNOSTICS") {
+    const diag = {
+      url: window.location.href,
+      meetingDetectorActive: !!meetingDetector,
+      captionObserverActive: !!captionObserver,
+      joyceAssistantActive: !!joyceAssistant,
+      meetingStartTime: meetingStartTime > 0 ? new Date(meetingStartTime).toISOString() : null,
+      currentTitle: currentMeetingTitle,
+      ariaLiveCount: document.querySelectorAll('[aria-live]').length,
+      videoCount: document.querySelectorAll('video').length,
+      buttonsWithAria: document.querySelectorAll('button[aria-label]').length,
+    };
+    sendResponse(diag);
+  }
+
   return false;
 });
 
